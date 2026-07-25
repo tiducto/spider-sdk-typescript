@@ -4,7 +4,7 @@ import { SpiderClient } from '../src/index.ts';
 
 test('exposes the three surfaces and the contract version', () => {
   const client = new SpiderClient('https://x', 'k');
-  assert.equal(client.contractVersion, '1.0.0');
+  assert.equal(client.contractVersion, '2.2');
   assert.ok(client.routing);
   assert.ok(client.stops);
   assert.ok(client.realtime);

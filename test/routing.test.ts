@@ -57,7 +57,7 @@ test('plan posts the persisted query and maps the route', async () => {
   assert.equal(call.url, 'https://brno.api.tiducto.eu/routing/plan');
   assert.equal(call.method, 'POST');
   assert.equal(call.headers.get('apikey'), 'k');
-  assert.equal(call.headers.get('x-spider-contract-version'), '1.0.0');
+  assert.equal(call.headers.get('x-spider-contract-version'), '2.2');
 
   const body = JSON.parse(call.body);
   assert.equal(body.id, 'f19608964d423831b485ccc878cb25eff56c720585d4423ee617c864e2b3102e');
@@ -208,7 +208,7 @@ test('upstream GraphQL errors become a failure result', async () => {
 });
 
 test('a contract-version mismatch throws instead of returning a result', async () => {
-  const mock = mockFetch({ json: PLAN_ENVELOPE, headers: { 'x-spider-contract-version': '2.0.0' } });
+  const mock = mockFetch({ json: PLAN_ENVELOPE, headers: { 'x-spider-contract-version': '3.0.0' } });
   const client = new SpiderClient('https://x', 'k', { fetch: mock.fetch });
   await assert.rejects(
     client.routing.plan({ origin: Location.coordinate(1, 2), destination: Location.coordinate(3, 4) }),
