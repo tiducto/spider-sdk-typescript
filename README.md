@@ -1,4 +1,4 @@
-# @tiducto/spider-sdk-client
+# @tiducto/spider-sdk-typescript
 
 The TypeScript SDK for the **Spider** transit API — trip planning, stop search, and live realtime data behind one typed contract. It ships the exact query documents the gateway allows and attaches auth for you, so you get a typed, closed surface out of the box.
 
@@ -7,7 +7,7 @@ This is a native TypeScript library with zero runtime dependencies (it uses the 
 ## Install
 
 ```bash
-npm install @tiducto/spider-sdk-client
+npm install @tiducto/spider-sdk-typescript
 ```
 
 Requires Node.js 20+ or any modern browser (anything with a global `fetch`).
@@ -17,7 +17,7 @@ Requires Node.js 20+ or any modern browser (anything with a global `fetch`).
 Construct a client with your environment's base URL and API key, then call a surface. Every call returns a `SpiderResult<T>` you branch on before reading `data`.
 
 ```ts
-import { SpiderClient, Location } from '@tiducto/spider-sdk-client';
+import { SpiderClient, Location } from '@tiducto/spider-sdk-typescript';
 
 const client = new SpiderClient('https://brno.api.tiducto.eu', process.env.SPIDER_API_KEY!);
 

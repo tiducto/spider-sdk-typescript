@@ -1,5 +1,5 @@
 {
-  "name": "@tiducto/spider-sdk-client",
+  "name": "@tiducto/spider-sdk-typescript",
   "version": "0.1.0",
   "description": "TypeScript SDK for the Spider transit API: trip planning, stop search, and live realtime data.",
   "type": "module",

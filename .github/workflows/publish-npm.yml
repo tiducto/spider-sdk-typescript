@@ -1,6 +1,6 @@
 name: publish npm
 
-# Publishes @tiducto/spider-sdk-client to GitHub Packages' npm registry.
+# Publishes @tiducto/spider-sdk-typescript to GitHub Packages' npm registry.
 #
 # Manual dispatch only. The published version is package.json's `version` — bump it before
 # dispatching, since npm rejects republishing an existing version. Auth uses the built-in
