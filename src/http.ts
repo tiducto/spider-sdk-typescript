@@ -1,5 +1,5 @@
 import { CONTRACT_HEADER, CONTRACT_VERSION, checkContract } from './contract.ts';
-import { DecodingError, TransportError } from './errors.ts';
+import { DecodingError, TransportError, parseErrorEnvelope } from './errors.ts';
 
 export type FetchLike = typeof fetch;
 
@@ -49,7 +49,9 @@ export class Transport {
     checkContract(res.headers.get(CONTRACT_HEADER));
     const text = await res.text();
     if (!res.ok) {
-      throw new TransportError('http', `routing ${op.path} -> ${res.status}: ${text.slice(0, 300)}`, res.status);
+      const env = parseErrorEnvelope(text);
+      const detail = env.message ?? text.slice(0, 300);
+      throw new TransportError('http', `routing ${op.path} -> ${res.status}: ${detail}`, res.status, env.code);
     }
     const envelope = parseJson<GraphQLEnvelope<D>>(text, `routing ${op.path}`);
     if (envelope.errors != null && envelope.errors.length > 0) {
@@ -70,8 +72,9 @@ export class Transport {
     checkContract(res.headers.get(CONTRACT_HEADER));
     const text = await res.text();
     if (!res.ok) {
-      const message = errorMessage ? errorMessage(text) : text.slice(0, 300);
-      throw new TransportError('http', `POST ${path} -> ${res.status}: ${message}`, res.status);
+      const env = parseErrorEnvelope(text);
+      const message = errorMessage ? errorMessage(text) : (env.message ?? text.slice(0, 300));
+      throw new TransportError('http', `POST ${path} -> ${res.status}: ${message}`, res.status, env.code);
     }
     return parseJson<D>(text, `POST ${path}`);
   }
@@ -79,7 +82,9 @@ export class Transport {
   async getJson<D>(path: string, query?: Record<string, string>): Promise<D> {
     const raw = await this.getRaw(path, query);
     if (!raw.ok) {
-      throw new TransportError('http', `GET ${path} -> ${raw.status}: ${raw.text.slice(0, 300)}`, raw.status);
+      const env = parseErrorEnvelope(raw.text);
+      const detail = env.message ?? raw.text.slice(0, 300);
+      throw new TransportError('http', `GET ${path} -> ${raw.status}: ${detail}`, raw.status, env.code);
     }
     return parseJson<D>(raw.text, `GET ${path}`);
   }
