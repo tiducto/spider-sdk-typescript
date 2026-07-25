@@ -1,0 +1,34 @@
+name: Build SDK
+
+# Typechecks, tests, and builds the library. Plain TypeScript with zero runtime
+# deps, so this runs on Linux — no native/Java toolchain needed (unlike the
+# Kotlin sibling's macOS build).
+#
+# CI runs only when a PR is ready — draft PRs skip it, so an unfinished PR doesn't burn a run;
+# ready_for_review re-triggers when a draft is promoted. workflow_dispatch validates main on demand.
+# Concurrency cancels superseded pushes.
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '22'
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build

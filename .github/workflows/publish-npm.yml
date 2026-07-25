@@ -1,0 +1,29 @@
+name: publish npm
+
+# Publishes @tiducto/spider-sdk-client to GitHub Packages' npm registry.
+#
+# Manual dispatch only. The published version is package.json's `version` — bump it before
+# dispatching, since npm rejects republishing an existing version. Auth uses the built-in
+# GITHUB_TOKEN (packages: write), so no PAT/secret is needed.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '22'
+          registry-url: 'https://npm.pkg.github.com'
+          scope: '@tiducto'
+      - run: npm ci
+      - run: npm run build
+      - run: npm publish
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

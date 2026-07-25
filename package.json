@@ -1,0 +1,52 @@
+{
+  "name": "@tiducto/spider-sdk-client",
+  "version": "0.1.0",
+  "description": "TypeScript SDK for the Spider transit API: trip planning, stop search, and live realtime data.",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "sideEffects": false,
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.test.json",
+    "test": "node --test test/*.test.ts",
+    "prepublishOnly": "npm run build"
+  },
+  "keywords": [
+    "tiducto",
+    "spider",
+    "transit",
+    "gtfs",
+    "trip-planning",
+    "sdk",
+    "typescript"
+  ],
+  "license": "MIT",
+  "homepage": "https://docs.tiducto.eu",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/tiducto/spider-sdk-typescript.git"
+  },
+  "publishConfig": {
+    "registry": "https://npm.pkg.github.com",
+    "access": "restricted"
+  },
+  "devDependencies": {
+    "@types/node": "^24.13.3",
+    "typescript": "^6.0.3"
+  }
+}
