@@ -3,9 +3,13 @@ import { fileURLToPath } from 'node:url';
 import { dirname, resolve } from 'node:path';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-const contractVersion = readFileSync(resolve(root, 'contract.version'), 'utf8').trim();
-const sdkPatch = readFileSync(resolve(root, 'sdk.patch'), 'utf8').trim();
-const version = `${contractVersion}.${sdkPatch}`;
+const props = Object.fromEntries(
+  readFileSync(resolve(root, 'version.properties'), 'utf8')
+    .split('\n')
+    .filter((line) => line.includes('='))
+    .map((line) => line.split('=').map((s) => s.trim())),
+);
+const version = `${props.contract}.${props.patch}`;
 
 const pkgPath = resolve(root, 'package.json');
 const pkg = JSON.parse(readFileSync(pkgPath, 'utf8'));
