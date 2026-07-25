@@ -1,9 +1,19 @@
 import { Transport } from './http.ts';
-import type { SpiderClientOptions } from './http.ts';
+import type { SpiderClientOptions, FeatureOptions, TransportOptions } from './http.ts';
 import { CONTRACT_VERSION } from './contract.ts';
 import { SpiderRouting } from './routing.ts';
 import { SpiderStops } from './stops.ts';
 import { SpiderRealtime } from './realtime.ts';
+
+function transportFor(
+  baseUrl: string,
+  apiKey: string,
+  base: TransportOptions,
+  feature?: FeatureOptions,
+): Transport {
+  const retry = feature?.autoRetry != null ? { maxAttempts: feature.autoRetry.maxAttempts ?? 3 } : undefined;
+  return new Transport(baseUrl, apiKey, { ...base, retry });
+}
 
 export class SpiderClient {
   readonly routing: SpiderRouting;
@@ -11,10 +21,10 @@ export class SpiderClient {
   readonly realtime: SpiderRealtime;
 
   constructor(baseUrl: string, apiKey: string, options?: SpiderClientOptions) {
-    const transport = new Transport(baseUrl, apiKey, options);
-    this.routing = new SpiderRouting(transport);
-    this.stops = new SpiderStops(transport);
-    this.realtime = new SpiderRealtime(transport);
+    const base: TransportOptions = { fetch: options?.fetch, timeoutMs: options?.timeoutMs };
+    this.routing = new SpiderRouting(transportFor(baseUrl, apiKey, base, options?.routing));
+    this.stops = new SpiderStops(transportFor(baseUrl, apiKey, base, options?.stops));
+    this.realtime = new SpiderRealtime(transportFor(baseUrl, apiKey, base, options?.realtime));
   }
 
   get contractVersion(): string {

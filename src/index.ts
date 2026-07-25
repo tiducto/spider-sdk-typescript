@@ -1,5 +1,5 @@
 export { SpiderClient } from './client.ts';
-export type { SpiderClientOptions, FetchLike } from './http.ts';
+export type { SpiderClientOptions, FetchLike, FeatureOptions, AutoRetryOptions } from './http.ts';
 export type { SpiderResult } from './result.ts';
 export type { SpiderError, SpiderErrorCode } from './errors.ts';
 export { SpiderContractMismatchError } from './errors.ts';
