@@ -1,11 +1,11 @@
 import { SpiderClient } from '@tiducto/spider-sdk-typescript'
 
-const brno = new SpiderClient(
-  'https://brno.api.tiducto.eu',
-  process.env.BRNO_API_KEY!,
+const primary = new SpiderClient(
+  'https://your-env-slug.api.tiducto.eu',
+  process.env.SPIDER_API_KEY!,
 )
 
-const praha = new SpiderClient(
-  'https://praha.api.tiducto.eu',
-  process.env.PRAHA_API_KEY!,
+const secondary = new SpiderClient(
+  'https://another-env-slug.api.tiducto.eu',
+  process.env.SPIDER_OTHER_API_KEY!,
 )
