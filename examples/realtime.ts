@@ -1,4 +1,4 @@
-import { SpiderClient } from '@tiducto/spider-sdk-typescript'
+import { SpiderClient, pollVehicles } from '@tiducto/spider-sdk-typescript'
 
 export function poll(client: SpiderClient, tripIds: string[], updateBoard: (data: unknown) => void) {
   setInterval(async () => {
@@ -9,6 +9,16 @@ export function poll(client: SpiderClient, tripIds: string[], updateBoard: (data
       console.error('realtime poll failed:', result.error)
     }
   }, 15_000)
+}
+
+export async function pollHelper(client: SpiderClient, tripIds: string[], updateBoard: (data: unknown) => void) {
+  for await (const result of pollVehicles(client.realtime, tripIds)) {
+    if (result.isSuccess) {
+      updateBoard(result.data)
+    } else {
+      console.error('realtime poll failed:', result.error)
+    }
+  }
 }
 
 export async function vehicles(client: SpiderClient, tripIds: string[]) {
