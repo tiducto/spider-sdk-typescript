@@ -23,6 +23,7 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.test.json",
+    "typecheck:examples": "tsc -p examples/tsconfig.json",
     "test": "node --test test/*.test.ts",
     "prepublishOnly": "npm run build"
   },

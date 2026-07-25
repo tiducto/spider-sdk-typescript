@@ -1,0 +1,12 @@
+{
+  "extends": "../tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "rootDir": "..",
+    "types": ["node"],
+    "paths": {
+      "@tiducto/spider-sdk-typescript": ["../src/index.ts"]
+    }
+  },
+  "include": ["."]
+}
