@@ -27,4 +27,6 @@ jobs:
       add-paths: |
         src/contract/routing
         contract/contract-version
+        version.properties
+        src/contractVersion.ts
     secrets: inherit
