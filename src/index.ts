@@ -36,3 +36,5 @@ export type {
   AlertInformedEntity,
   ServiceAlerts,
 } from './realtime.ts';
+export { pollVehicles, pollVehicleForTrip, pollDelays, pollAlerts } from './polling.ts';
+export type { PollOptions } from './polling.ts';
