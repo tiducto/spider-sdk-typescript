@@ -124,7 +124,7 @@ jobs:
           body: |
             Syncs `src/contract/routing` to
             [`tiducto/spider-contract`](https://github.com/tiducto/spider-contract) **v${{ steps.next.outputs.ver }}** (`${{ steps.next.outputs.sha }}`)
-            via `scripts/generate-contract.sh` (spider-codegen, our own generator).
+            via `scripts/generate-contract.sh`.
 
             Advances the version marker `contract/contract-version` to **${{ steps.next.outputs.ver }}**.
 
