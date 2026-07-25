@@ -30,5 +30,6 @@ jobs:
           node-version: '22'
       - run: npm ci
       - run: npm run typecheck
+      - run: npm run typecheck:examples
       - run: npm test
       - run: npm run build
