@@ -11,10 +11,10 @@ on:
   # Nightly backstop in case a dispatch is missed.
   schedule:
     - cron: "0 6 * * *"
-  # Auto-chain: a merged sync PR bumps the marker; that push syncs the next version.
+  # Auto-chain: a merged sync PR bumps version.properties; that push syncs the next version.
   push:
     branches: [main]
-    paths: ["contract/contract-version"]
+    paths: ["version.properties"]
 
 permissions:
   contents: write
@@ -26,7 +26,6 @@ jobs:
     with:
       add-paths: |
         src/contract/routing
-        contract/contract-version
         version.properties
         src/contractVersion.ts
     secrets: inherit

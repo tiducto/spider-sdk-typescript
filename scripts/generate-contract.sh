@@ -46,25 +46,12 @@ else
         | base64 -d > "$WORK_DIR/openapi.json"
 fi
 
-# Stamp the contract version (the spec's info.version) into the version spine. On an actual contract change
-# this updates `contract=` AND resets `patch=` to 0 (a new contract line starts a fresh patch sequence); an
-# unchanged re-run leaves both fields alone, so a maintainer's patch bump is never clobbered. The package
-# version (contract.patch) is applied to package.json by scripts/stamp-version.mjs at publish;
-# src/contractVersion.ts is the wire version the client declares.
+# The wire version the client declares (contractVersion.ts) is the spec's info.version — the exact
+# protocol version these generated types speak. The package version is separate: it lives in
+# version.properties (contract.patch), which the contract-sync workflow bumps — not this script.
+# scripts/stamp-version.mjs applies contract.patch to package.json at publish.
 CONTRACT_VERSION="$(node -e "process.stdout.write(String(require('$WORK_DIR/openapi.json').info.version))")"
 echo "==> Contract version: $CONTRACT_VERSION"
-VERSION_FILE="$REPO_ROOT/version.properties"
-if [[ -f "$VERSION_FILE" ]]; then
-    CURRENT_CONTRACT="$(sed -n 's/^contract=//p' "$VERSION_FILE")"
-    if [[ "$CURRENT_CONTRACT" != "$CONTRACT_VERSION" ]]; then
-        sed -i.bak -e "s/^contract=.*/contract=$CONTRACT_VERSION/" -e "s/^patch=.*/patch=0/" "$VERSION_FILE" && rm -f "$VERSION_FILE.bak"
-        echo "==> contract $CURRENT_CONTRACT → $CONTRACT_VERSION; reset patch=0"
-    else
-        echo "==> contract unchanged ($CONTRACT_VERSION); patch left as-is"
-    fi
-else
-    printf 'contract=%s\npatch=0\n' "$CONTRACT_VERSION" > "$VERSION_FILE"
-fi
 printf "export const CONTRACT_VERSION = '%s';\n" "$CONTRACT_VERSION" > "$REPO_ROOT/src/contractVersion.ts"
 
 # Obtain + build the generator. Set CODEGEN_DIR to a local checkout to skip the clone (local dev).
