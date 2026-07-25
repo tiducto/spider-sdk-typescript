@@ -12,6 +12,7 @@ export interface SpiderError {
   readonly code: SpiderErrorCode;
   readonly message: string;
   readonly httpStatus?: number;
+  readonly serverCode?: string;
   readonly cause?: unknown;
 }
 
@@ -32,13 +33,32 @@ export type TransportErrorKind = 'http' | 'no_data' | 'upstream';
 export class TransportError extends Error {
   readonly kind: TransportErrorKind;
   readonly httpStatus: number | undefined;
+  readonly serverCode: string | undefined;
 
-  constructor(kind: TransportErrorKind, message: string, httpStatus?: number) {
+  constructor(kind: TransportErrorKind, message: string, httpStatus?: number, serverCode?: string) {
     super(message);
     this.name = 'TransportError';
     this.kind = kind;
     this.httpStatus = httpStatus;
+    this.serverCode = serverCode;
   }
+}
+
+export function parseErrorEnvelope(text: string): { code?: string; message?: string } {
+  let body: unknown;
+  try {
+    body = JSON.parse(text);
+  } catch {
+    return {};
+  }
+  if (typeof body === 'object' && body !== null) {
+    const b = body as Record<string, unknown>;
+    return {
+      code: typeof b.code === 'string' ? b.code : undefined,
+      message: typeof b.message === 'string' ? b.message : undefined,
+    };
+  }
+  return {};
 }
 
 export class DecodingError extends Error {
@@ -65,12 +85,14 @@ export function toSpiderError(e: unknown): SpiderError {
   if (e instanceof TransportError) {
     if (e.kind === 'http') {
       const status = e.httpStatus ?? 0;
-      if (status === 401 || status === 403) return { code: 'unauthorized', message: e.message, httpStatus: status };
-      if (status === 404) return { code: 'not_found', message: e.message, httpStatus: status };
-      if (status === 408 || status === 504) return { code: 'timeout', message: e.message, httpStatus: status };
-      if (status === 429) return { code: 'rate_limited', message: e.message, httpStatus: status };
-      if (status >= 500 && status <= 599) return { code: 'server', message: e.message, httpStatus: status };
-      return { code: 'unknown', message: e.message, httpStatus: status };
+      const code: SpiderErrorCode =
+        status === 401 || status === 403 ? 'unauthorized'
+          : status === 404 ? 'not_found'
+            : status === 408 || status === 504 ? 'timeout'
+              : status === 429 ? 'rate_limited'
+                : status >= 500 && status <= 599 ? 'server'
+                  : 'unknown';
+      return { code, message: e.message, httpStatus: status, serverCode: e.serverCode };
     }
     if (e.kind === 'no_data') return { code: 'not_found', message: e.message };
     return { code: 'server', message: e.message };

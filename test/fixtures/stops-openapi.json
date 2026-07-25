@@ -60,7 +60,7 @@
         "type": "apiKey",
         "in": "header",
         "name": "apikey",
-        "description": "Kong key-auth. The raw key in an `apikey` header (not Authorization: Bearer)."
+        "description": "The raw key in an `apikey` header (not Authorization: Bearer)."
       }
     },
     "schemas": {

@@ -1,6 +1,7 @@
 import { SpiderContractMismatchError } from './errors.ts';
+import { CONTRACT_VERSION } from './contractVersion.ts';
 
-export const CONTRACT_VERSION = '1.0.0';
+export { CONTRACT_VERSION };
 
 export const CONTRACT_HEADER = 'x-spider-contract-version';
 
