@@ -6,6 +6,23 @@ import type { BikesAllowed, TransitMode, WheelchairBoarding } from './enums.ts';
 import { bikesAllowedFromWire, transitModeFromWire, wheelchairFromWire } from './enums.ts';
 import type { Location, ViaLocation } from './location.ts';
 import { decodePolyline } from './polyline.ts';
+import type {
+  PlanConnectionData as PlanConnectionDataWire,
+  PlanConnectionVariables,
+  RoutingErrorCode,
+  InputField,
+  Itinerary as ItineraryWire,
+  Leg as LegWire,
+  PlanLabeledLocationInput,
+  PlanViaLocationInput,
+  StopDeparturesData as StopDeparturesDataWire,
+  StopDeparturesVariables,
+  Stop as DeparturesStopWire,
+  RealtimeState,
+  TripData as TripDataWire,
+  TripVariables,
+  TripTrip as TripTripWire,
+} from './contract/routing/index.ts';
 
 export interface LatLon {
   readonly lat: number;
@@ -55,9 +72,9 @@ export interface RoutePageInfo {
 }
 
 export interface RoutingError {
-  readonly code: string;
+  readonly code: RoutingErrorCode;
   readonly description: string;
-  readonly inputField: string | null;
+  readonly inputField: InputField | null;
 }
 
 export interface Route {
@@ -71,7 +88,7 @@ export interface Departure {
   readonly scheduledTimeEpochMs: number;
   readonly realtimeTimeEpochMs: number | null;
   readonly isRealtime: boolean;
-  readonly realtimeState: string | null;
+  readonly realtimeState: RealtimeState | null;
   readonly headsign: string | null;
   readonly tripGtfsId: string | null;
   readonly routeShortName: string | null;
@@ -177,7 +194,7 @@ export class SpiderRouting {
     options?: DeparturesOptions,
   ): Promise<SpiderResult<Departure[]>> {
     try {
-      const variables = {
+      const variables: StopDeparturesVariables = {
         id: stopId,
         numberOfDepartures,
         startTime: options?.startTime != null ? Math.floor(toEpochMs(options.startTime) / 1000) : undefined,
@@ -197,7 +214,8 @@ export class SpiderRouting {
 
   async trip(tripId: string, serviceDate?: string): Promise<SpiderResult<TripDetails>> {
     try {
-      const data = await this.transport.graphql<TripDataWire>(TRIP, { id: tripId, serviceDate });
+      const variables: TripVariables = { id: tripId, serviceDate };
+      const data = await this.transport.graphql<TripDataWire>(TRIP, variables);
       const trip = data.trip;
       if (trip == null) {
         throw new TransportError('no_data', `routing returned no trip for id=${tripId}`);
@@ -233,7 +251,7 @@ export class SpiderRouting {
     const dateTime = request.time.kind === 'departAt'
       ? { earliestDeparture: iso }
       : { latestArrival: iso };
-    const variables = {
+    const variables: PlanConnectionVariables = {
       dateTime,
       origin: locationToInput(request.origin),
       destination: locationToInput(request.destination),
@@ -279,29 +297,16 @@ function clampSeconds(seconds: number): number {
   return Math.max(0, Math.min(Math.floor(seconds), INT_MAX));
 }
 
-interface LabeledLocationInput {
-  location: { coordinate?: { latitude: number; longitude: number }; stopLocation?: { stopLocationId: string } };
-}
-
-function locationToInput(location: Location): LabeledLocationInput {
+function locationToInput(location: Location): PlanLabeledLocationInput {
   if (location.kind === 'stop') {
     return { location: { stopLocation: { stopLocationId: location.id } } };
   }
   return { location: { coordinate: { latitude: location.latitude, longitude: location.longitude } } };
 }
 
-interface ViaInput {
-  passThrough?: { stopLocationIds: readonly string[] };
-  visit?: {
-    coordinate?: { latitude: number; longitude: number };
-    stopLocationIds?: readonly string[];
-    minimumWaitTime?: string;
-  };
-}
-
-function viaToInput(via: ViaLocation): ViaInput {
+function viaToInput(via: ViaLocation): PlanViaLocationInput {
   if (via.kind === 'passThrough') {
-    return { passThrough: { stopLocationIds: via.stopIds } };
+    return { passThrough: { stopLocationIds: [...via.stopIds] } };
   }
   const minimumWaitTime = via.minimumWaitSeconds > 0 ? `PT${via.minimumWaitSeconds}S` : undefined;
   if (via.location.kind === 'stop') {
@@ -348,7 +353,7 @@ function mapLeg(leg: LegWire): Leg {
   };
 }
 
-function mapDepartures(stop: StopWire): Departure[] {
+function mapDepartures(stop: DeparturesStopWire): Departure[] {
   const stopName = stop.name.trim().toLowerCase();
   const out: Departure[] = [];
   for (const st of stop.stoptimesWithoutPatterns ?? []) {
@@ -404,117 +409,4 @@ function mapTrip(trip: TripTripWire): TripDetails {
     stops,
     geometry: trip.tripGeometry?.points ? decodePolyline(trip.tripGeometry.points) : [],
   };
-}
-
-interface PlanConnectionDataWire {
-  planConnection?: PlanConnectionWire | null;
-}
-
-interface PlanConnectionWire {
-  pageInfo: PlanPageInfoWire;
-  routingErrors: RoutingErrorWire[];
-  edges?: PlanEdgeWire[] | null;
-  searchDateTime?: string | null;
-}
-
-interface PlanEdgeWire {
-  cursor: string;
-  node: ItineraryWire;
-}
-
-interface ItineraryWire {
-  numberOfTransfers: number;
-  legs: LegWire[];
-  start?: string | null;
-  end?: string | null;
-  duration?: number | null;
-  waitingTime?: number | null;
-  accessibilityScore?: number | null;
-}
-
-interface LegWire {
-  start: { scheduledTime: string };
-  end: { scheduledTime: string };
-  from: PlaceWire;
-  to: PlaceWire;
-  mode?: string | null;
-  route?: RouteWire | null;
-  headsign?: string | null;
-  distance?: number | null;
-  duration?: number | null;
-  accessibilityScore?: number | null;
-  trip?: { gtfsId: string; bikesAllowed?: string | null } | null;
-  legGeometry?: { points?: string | null } | null;
-}
-
-interface PlaceWire {
-  name?: string | null;
-  stop?: { wheelchairBoarding?: string | null } | null;
-}
-
-interface RouteWire {
-  shortName?: string | null;
-  longName?: string | null;
-  mode?: string | null;
-}
-
-interface PlanPageInfoWire {
-  hasNextPage: boolean;
-  hasPreviousPage: boolean;
-  startCursor?: string | null;
-  endCursor?: string | null;
-  searchWindowUsed?: string | null;
-}
-
-interface RoutingErrorWire {
-  code: string;
-  description: string;
-  inputField?: string | null;
-}
-
-interface StopDeparturesDataWire {
-  asStop?: StopWire | null;
-  asStation?: StopWire | null;
-}
-
-interface StopWire {
-  gtfsId: string;
-  name: string;
-  wheelchairBoarding?: string | null;
-  stoptimesWithoutPatterns?: StoptimeWire[] | null;
-}
-
-interface StoptimeWire {
-  serviceDay?: number | null;
-  scheduledDeparture?: number | null;
-  realtimeDeparture?: number | null;
-  realtime?: boolean | null;
-  realtimeState?: string | null;
-  headsign?: string | null;
-  trip?: { gtfsId: string; bikesAllowed?: string | null; route?: RouteWire | null } | null;
-}
-
-interface TripDataWire {
-  trip?: TripTripWire | null;
-}
-
-interface TripTripWire {
-  gtfsId: string;
-  route: RouteWire;
-  directionId?: string | null;
-  tripHeadsign?: string | null;
-  bikesAllowed?: string | null;
-  stoptimesForDate?: TripStoptimeWire[] | null;
-  tripGeometry?: { points?: string | null } | null;
-}
-
-interface TripStoptimeWire {
-  serviceDay?: number | null;
-  scheduledArrival?: number | null;
-  scheduledDeparture?: number | null;
-  realtimeArrival?: number | null;
-  realtimeDeparture?: number | null;
-  realtime?: boolean | null;
-  realtimeState?: string | null;
-  stop?: { gtfsId: string; name: string; lat?: number | null; lon?: number | null; wheelchairBoarding?: string | null } | null;
 }

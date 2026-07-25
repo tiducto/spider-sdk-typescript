@@ -112,6 +112,8 @@ npm run typecheck  # type-check src + tests
 npm test           # run the test suite (node --test, mocked fetch)
 ```
 
+`src/contract/routing` is generated from [`tiducto/spider-contract`](https://github.com/tiducto/spider-contract) via `scripts/generate-contract.sh` (spider-codegen) — don't hand-edit it; run the script or wait for the `generate-contract` workflow to open a sync PR. The stops and realtime wire types are hand-written and checked against the published contract by `test/contractPin.test.ts`, using the fixtures under `test/fixtures`.
+
 ## License
 
 MIT

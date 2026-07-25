@@ -37,7 +37,7 @@ export class SpiderStops {
     try {
       const q = filter.name ?? '';
       const expression = buildFilterExpression(filter);
-      const body = expression != null ? { q, filter: expression } : { q };
+      const body: StopSearchRequestWire = expression != null ? { q, filter: expression } : { q };
       const response = await this.transport.postJson<StopSearchResponseWire>('/stops/search', body, extractStopError);
       return success(response.hits.map(toStop));
     } catch (e) {
@@ -64,7 +64,7 @@ function escapeFilter(value: string): string {
 
 function extractStopError(raw: string): string {
   try {
-    const parsed = JSON.parse(raw) as { message?: unknown };
+    const parsed = JSON.parse(raw) as StopSearchErrorWire;
     if (typeof parsed.message === 'string') return parsed.message;
   } catch {
     return raw.slice(0, 300);
@@ -86,9 +86,21 @@ function toStop(hit: StopHitWire): Stop {
   };
 }
 
+interface StopSearchRequestWire {
+  q: string;
+  filter?: string;
+}
+
 interface StopSearchResponseWire {
   hits: StopHitWire[];
   query?: string;
+}
+
+interface StopSearchErrorWire {
+  message: string;
+  code?: string;
+  type?: string;
+  link?: string;
 }
 
 interface StopHitWire {

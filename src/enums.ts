@@ -1,17 +1,6 @@
-export type TransitMode =
-  | 'WALK'
-  | 'BUS'
-  | 'COACH'
-  | 'TROLLEYBUS'
-  | 'CARPOOL'
-  | 'TRAM'
-  | 'RAIL'
-  | 'SUBWAY'
-  | 'MONORAIL'
-  | 'FERRY'
-  | 'AIRPLANE'
-  | 'TAXI'
-  | 'UNKNOWN';
+import type { Mode as LegModeWire, TransitMode as RouteModeWire } from './contract/routing/index.ts';
+
+export type TransitMode = LegModeWire | RouteModeWire | 'UNKNOWN';
 
 export type WheelchairBoarding = 'Possible' | 'NotPossible';
 
@@ -29,8 +18,9 @@ export type OccupancyStatus =
   | 'UNKNOWN';
 
 const TRANSIT_MODES: ReadonlySet<string> = new Set([
-  'WALK', 'BUS', 'COACH', 'TROLLEYBUS', 'CARPOOL', 'TRAM', 'RAIL',
-  'SUBWAY', 'MONORAIL', 'FERRY', 'AIRPLANE', 'TAXI',
+  'AIRPLANE', 'BICYCLE', 'BUS', 'CABLE_CAR', 'CAR', 'CARPOOL', 'COACH', 'FERRY',
+  'FLEX', 'FLEXIBLE', 'FUNICULAR', 'GONDOLA', 'LEG_SWITCH', 'MONORAIL', 'RAIL',
+  'SCOOTER', 'SNOW_AND_ICE', 'SUBWAY', 'TAXI', 'TRAM', 'TRANSIT', 'TROLLEYBUS', 'WALK',
 ]);
 
 export function transitModeFromWire(raw: string | null | undefined): TransitMode | null {

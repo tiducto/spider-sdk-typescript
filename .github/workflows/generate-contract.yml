@@ -1,0 +1,132 @@
+name: Pull contract updates
+
+# Syncs the generated routing wire types (src/contract/routing) to tiducto/spider-contract, one released
+# version per run ("B2"). The synced version is recorded in the marker file contract/contract-version;
+# released contract versions are git tags v<version> (e.g. v1.2). Each run reads the marker, finds the
+# SMALLEST released tag strictly greater than it, regenerates the types pinned to that tag's SHA, advances
+# the marker, and opens a PR. Merging that PR bumps the marker, whose push re-triggers this workflow — so
+# versions are climbed one at a time until the SDK is current. When no released tag is newer than the
+# marker, the job no-ops green (no PR). Mirrors spider-sdk-kotlin's workflow of the same name.
+#
+# The PR carries ONLY the generated routing types and the marker. scripts/generate-contract.sh also
+# refreshes the stops/realtime JSON pin fixtures under test/fixtures — those are deliberately EXCLUDED
+# from the PR (see add-paths below) and never committed by this workflow.
+on:
+  # Manual kick — no inputs; the workflow resolves the next version from the marker + tags itself.
+  workflow_dispatch:
+  # Fired by the admintool when a contract version is released.
+  repository_dispatch:
+    types: [contract-released]
+  # Nightly backstop in case a dispatch is missed.
+  schedule:
+    - cron: "0 6 * * *"
+  # Auto-chain: a merged sync PR bumps the marker; that push syncs the next version.
+  push:
+    branches: [main]
+    paths: ["contract/contract-version"]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: contract-sync
+  cancel-in-progress: false
+
+jobs:
+  generate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Set up Node
+        uses: actions/setup-node@v5
+        with:
+          node-version: "22"
+
+      # Read the marker (the version we're synced to), enumerate released contract tags, and pick the
+      # smallest tag strictly greater than the marker — the next version to sync. Nothing greater ⇒
+      # no-op green. The chosen version is pinned to its commit SHA (annotated tags are dereferenced)
+      # so generation can't race a moving branch.
+      - name: Resolve next version
+        id: next
+        env:
+          GH_TOKEN: ${{ secrets.CONTRACT_REPO_TOKEN }}
+        run: |
+          MARKER=$(cat contract/contract-version)
+          echo "Marker (currently synced): v$MARKER"
+
+          # Released versions are tags v<major>.<minor>; strip the leading v. grep may match nothing
+          # (no tags released yet) — tolerate that so the job stays green.
+          TAGS=$(gh api --paginate repos/tiducto/spider-contract/tags --jq '.[].name' \
+            | grep -E '^v[0-9]' | sed 's/^v//' || true)
+
+          # Ascending version sort; take the first entry strictly greater than the marker.
+          NEXT=""
+          for v in $(printf '%s\n' "$TAGS" | sort -V -u); do
+            [ -z "$v" ] && continue
+            if [ "$v" != "$MARKER" ] \
+              && [ "$(printf '%s\n%s\n' "$MARKER" "$v" | sort -V | head -1)" = "$MARKER" ]; then
+              NEXT="$v"
+              break
+            fi
+          done
+
+          if [ -z "$NEXT" ]; then
+            echo "SDK already current at v$MARKER"
+            echo "has=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # Resolve the tag to a commit SHA, dereferencing annotated tags to the commit they point at.
+          REF=$(gh api "repos/tiducto/spider-contract/git/refs/tags/v$NEXT")
+          SHA=$(printf '%s' "$REF" | jq -r '.object.sha')
+          TYPE=$(printf '%s' "$REF" | jq -r '.object.type')
+          if [ "$TYPE" = "tag" ]; then
+            SHA=$(gh api "repos/tiducto/spider-contract/git/tags/$SHA" --jq '.object.sha')
+          fi
+
+          echo "Next version to sync: v$NEXT ($SHA)"
+          {
+            echo "has=true"
+            echo "ver=$NEXT"
+            echo "sha=$SHA"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Regenerate contract types
+        if: steps.next.outputs.has == 'true'
+        env:
+          # Reads the private contract AND spider-codegen repos; PR creation below uses the default GITHUB_TOKEN.
+          CONTRACT_REPO_TOKEN: ${{ secrets.CONTRACT_REPO_TOKEN }}
+        run: ./scripts/generate-contract.sh --ref "${{ steps.next.outputs.sha }}"
+
+      - name: Update version marker
+        if: steps.next.outputs.has == 'true'
+        run: printf '%s\n' "${{ steps.next.outputs.ver }}" > contract/contract-version
+
+      - name: Open PR
+        if: steps.next.outputs.has == 'true'
+        uses: peter-evans/create-pull-request@v8
+        with:
+          # One PR per contract version; re-running the same version updates its PR.
+          branch: contract/v${{ steps.next.outputs.ver }}
+          base: main
+          # Tag the auto-generated sync PRs so they're easy to filter (and for any auto-merge/CODEOWNERS rules).
+          labels: contract-sync
+          # Only the generated routing types and the marker — NOT the stops/realtime JSON pin fixtures
+          # the script also refreshes.
+          add-paths: |
+            src/contract/routing
+            contract/contract-version
+          title: "chore(contract): sync SDK to spider-contract v${{ steps.next.outputs.ver }}"
+          commit-message: "chore(contract): sync SDK to spider-contract v${{ steps.next.outputs.ver }}"
+          body: |
+            Syncs `src/contract/routing` to
+            [`tiducto/spider-contract`](https://github.com/tiducto/spider-contract) **v${{ steps.next.outputs.ver }}** (`${{ steps.next.outputs.sha }}`)
+            via `scripts/generate-contract.sh` (spider-codegen, our own generator).
+
+            Advances the version marker `contract/contract-version` to **${{ steps.next.outputs.ver }}**.
+
+            Generated code — review the API-surface diff, don't hand-edit the types.
+          delete-branch: true

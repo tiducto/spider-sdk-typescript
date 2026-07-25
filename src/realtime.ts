@@ -285,6 +285,18 @@ interface DelaysResponseWire extends FreshnessWire {
   missing?: string[];
 }
 
+interface ActivePeriodDtoWire {
+  start?: number | null;
+  end?: number | null;
+}
+
+interface InformedEntityDtoWire {
+  agencyId?: string | null;
+  routeId?: string | null;
+  tripId?: string | null;
+  stopId?: string | null;
+}
+
 interface AlertDtoWire {
   id?: string | null;
   cause?: string | null;
@@ -293,8 +305,8 @@ interface AlertDtoWire {
   headerText?: string | null;
   descriptionText?: string | null;
   url?: string | null;
-  activePeriods?: Array<{ start?: number | null; end?: number | null }>;
-  informedEntities?: Array<{ agencyId?: string | null; routeId?: string | null; tripId?: string | null; stopId?: string | null }>;
+  activePeriods?: ActivePeriodDtoWire[];
+  informedEntities?: InformedEntityDtoWire[];
 }
 
 interface AlertsResponseWire extends FreshnessWire {

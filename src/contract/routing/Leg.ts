@@ -1,0 +1,21 @@
+import type { LegTime } from './LegTime.ts';
+import type { Mode } from './Mode.ts';
+import type { Place } from './Place.ts';
+import type { PlanConnectionGeometry } from './PlanConnectionGeometry.ts';
+import type { PlanConnectionRoute } from './PlanConnectionRoute.ts';
+import type { PlanConnectionTrip } from './PlanConnectionTrip.ts';
+
+export interface Leg {
+  mode?: Mode;
+  start: LegTime;
+  end: LegTime;
+  from: Place;
+  to: Place;
+  route?: PlanConnectionRoute;
+  headsign?: string;
+  distance?: number;
+  duration?: number;
+  accessibilityScore?: number;
+  trip?: PlanConnectionTrip;
+  legGeometry?: PlanConnectionGeometry;
+}
