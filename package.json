@@ -25,6 +25,7 @@
     "typecheck": "tsc -p tsconfig.test.json",
     "typecheck:examples": "tsc -p examples/tsconfig.json",
     "test": "node --test test/*.test.ts",
+    "test:integration": "node --test test/integration/*.test.ts",
     "stamp-version": "node scripts/stamp-version.mjs",
     "prepublishOnly": "npm run stamp-version && npm run build"
   },
@@ -48,6 +49,7 @@
     "access": "restricted"
   },
   "devDependencies": {
+    "@stoplight/prism-cli": "^5.16.0",
     "@types/node": "^24.13.3",
     "typescript": "^6.0.3"
   }
