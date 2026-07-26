@@ -1,4 +1,5 @@
 export type { BikesAllowed } from './BikesAllowed.ts';
+export type { ErrorResponse } from './ErrorResponse.ts';
 export type { Geometry } from './Geometry.ts';
 export type { GraphQLError } from './GraphQLError.ts';
 export type { InputField } from './InputField.ts';

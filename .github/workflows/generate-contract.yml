@@ -28,4 +28,5 @@ jobs:
         src/contract/routing
         version.properties
         src/contractVersion.ts
+        src/persistedQueries.ts
     secrets: inherit

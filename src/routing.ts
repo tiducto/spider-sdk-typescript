@@ -6,6 +6,7 @@ import type { BikesAllowed, TransitMode, WheelchairBoarding } from './enums.ts';
 import { bikesAllowedFromWire, transitModeFromWire, wheelchairFromWire } from './enums.ts';
 import type { Location, ViaLocation } from './location.ts';
 import { decodePolyline } from './polyline.ts';
+import { DEPARTURES, PLAN, TRIP } from './persistedQueries.ts';
 import type {
   PlanConnectionData as PlanConnectionDataWire,
   PlanConnectionVariables,
@@ -138,10 +139,6 @@ export interface DeparturesOptions {
 const DEFAULT_FIRST = 5;
 const DEFAULT_TIME_RANGE_SECONDS = 24 * 60 * 60;
 const INT_MAX = 2_147_483_647;
-
-const PLAN = { id: 'f19608964d423831b485ccc878cb25eff56c720585d4423ee617c864e2b3102e', path: 'plan' };
-const DEPARTURES = { id: '70a644fe3c6b2cbf5b2d70cef8230c1428bea6357ae1766772162d86469563d0', path: 'departures' };
-const TRIP = { id: 'e8959a8d47a8e8437ee3ec740cd9c3e28bd401efdd236dde0502559daea53920', path: 'trip' };
 
 interface RouteTimeSpec {
   readonly kind: 'departAt' | 'arriveBy';

@@ -54,6 +54,41 @@ CONTRACT_VERSION="$(node -e "process.stdout.write(String(require('$WORK_DIR/open
 echo "==> Contract version: $CONTRACT_VERSION"
 printf "export const CONTRACT_VERSION = '%s';\n" "$CONTRACT_VERSION" > "$REPO_ROOT/src/contractVersion.ts"
 
+# Persisted-query ids come from the contract too (x-persisted-query-id per routing operation). The
+# gateway 403s an id it hasn't registered, so these must never be hand-edited out of step with the spec.
+cat > "$WORK_DIR/persisted-queries.js" <<'NODE'
+const fs = require('fs');
+const [specPath, outPath] = process.argv.slice(2);
+const spec = JSON.parse(fs.readFileSync(specPath, 'utf8'));
+const ops = [];
+for (const [route, methods] of Object.entries(spec.paths || {})) {
+    for (const op of Object.values(methods)) {
+        const id = op && op['x-persisted-query-id'];
+        if (!id) continue;
+        const path = route.replace(/^\/routing\//, '');
+        ops.push({ name: path.toUpperCase().replace(/[^A-Z0-9]/g, '_'), id, path });
+    }
+}
+if (ops.length === 0) {
+    console.error('ERROR: no x-persisted-query-id found in the routing spec');
+    process.exit(1);
+}
+ops.sort((a, b) => a.name.localeCompare(b.name));
+const entries = ops
+    .map((o) => `export const ${o.name}: PersistedOp = { id: '${o.id}', path: '${o.path}' };`)
+    .join('\n');
+fs.writeFileSync(outPath, `export interface PersistedOp {
+  readonly id: string;
+  readonly path: string;
+}
+
+${entries}
+`);
+process.stdout.write(String(ops.length));
+NODE
+PQ_COUNT="$(node "$WORK_DIR/persisted-queries.js" "$WORK_DIR/openapi.json" "$REPO_ROOT/src/persistedQueries.ts")"
+echo "==> Persisted-query ids: $PQ_COUNT"
+
 # Obtain + build the generator. Set CODEGEN_DIR to a local checkout to skip the clone (local dev).
 if [[ -n "${CODEGEN_DIR:-}" ]]; then
     echo "==> Using local spider-codegen at $CODEGEN_DIR"
