@@ -28,6 +28,30 @@ export async function planForTime(client: SpiderClient) {
   })
 }
 
+export async function laterItineraries(client: SpiderClient) {
+  const firstPage = await client.routing.plan({
+    origin: Location.coordinate(49.1951, 16.6068),
+    destination: Location.coordinate(49.2246, 16.5747),
+    first: 3,
+  })
+
+  if (!firstPage.isSuccess) {
+    console.error('Planning failed:', firstPage.error)
+    return
+  }
+
+  const later = await client.routing.nextPage(firstPage.data, 3)
+  if (later === null) {
+    console.log('No later itineraries — that was the last page')
+  } else if (later.isSuccess) {
+    for (const edge of later.data.edges) {
+      console.log(`${edge.itinerary.start} → ${edge.itinerary.end}`)
+    }
+  } else {
+    console.error('Paging failed:', later.error)
+  }
+}
+
 export async function departures(client: SpiderClient) {
   const result = await client.routing.departures('U123Z1', 5)
 
