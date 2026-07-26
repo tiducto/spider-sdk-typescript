@@ -19,7 +19,7 @@ Construct a client with your environment's base URL and API key, then call a sur
 ```ts
 import { SpiderClient, Location } from '@tiducto/spider-sdk-typescript';
 
-const client = new SpiderClient('https://brno.api.tiducto.eu', process.env.SPIDER_API_KEY!);
+const client = new SpiderClient('https://your-env-slug.api.tiducto.eu', process.env.SPIDER_API_KEY!);
 
 const result = await client.routing.plan({
   origin: Location.coordinate(49.1908, 16.6128),

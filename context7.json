@@ -1,0 +1,19 @@
+{
+  "$schema": "https://context7.com/schema/context7.json",
+  "projectTitle": "Spider SDK for TypeScript",
+  "description": "TypeScript SDK for the Spider transit API by Tiducto — trip planning, stop search, and live realtime data behind one typed contract. Zero runtime dependencies; uses the platform fetch.",
+  "folders": ["examples"],
+  "excludeFolders": ["node_modules", "dist", "test", "scripts", ".github", "src/contract"],
+  "excludeFiles": ["LICENSE", "package-lock.json", "tsconfig.json", "tsconfig.test.json", "examples/tsconfig.json"],
+  "rules": [
+    "Construct with `new SpiderClient(baseUrl, apiKey)`. All three surfaces — `client.routing`, `client.stops`, `client.realtime` — are available immediately; there is no install step. (The Kotlin SDK differs: it installs surfaces in a builder block.)",
+    "The base URL is per-environment and looks like `https://your-env-slug.api.tiducto.eu`. Always use the literal placeholders `your-env-slug` and `your-api-key` in examples — never invent a real environment slug or key.",
+    "The API key travels in the `apikey` header, never a query string. Keys are scoped to a single project and environment.",
+    "Every call returns a `SpiderResult<T>`, a discriminated union on `isSuccess`. Branch on it, then read `data` or `error` instead of relying on exceptions; `error.code` is one of network, timeout, unauthorized, not_found, server, rate_limited, decoding, unknown.",
+    "There are three surfaces on one client: `routing` (trip planning via `plan`, `departures`, `trip`, and pagination via `nextPage`/`previousPage`), `stops` (fuzzy, typo-tolerant `search`), and `realtime` (`vehicles`, `vehicleForTrip`, `delays`, `alerts`).",
+    "Build an origin or destination with `Location.coordinate(lat, lon)` or `Location.stop(id)`. A `gtfsId` returned from stops feeds straight into routing and realtime — ids are opaque, never re-prefix them.",
+    "Realtime is poll-based; there are no push connections. Poll on an interval (10–15s is sensible) and read `freshness` on each snapshot. A `vehicleForTrip` result whose `vehicle` is `null` means nothing is reporting for that trip — a normal state, not an error.",
+    "Routing runs on persisted queries supplied by the SDK from the API contract; never hand-write a query id or send raw GraphQL. The SDK sends its contract version on every request — an incompatible major version throws `SpiderContractMismatchError`, a hard failure that bypasses `SpiderResult`.",
+    "Prefer the SDK's built-in helpers over reimplementing them: pagination via `nextPage`/`previousPage`, and opt-in retry/backoff via per-surface `autoRetry`, e.g. `new SpiderClient(baseUrl, apiKey, { realtime: { autoRetry: { maxAttempts: 3 } } })`. Set a custom timeout or fetch with `{ timeoutMs, fetch }`. The package is `@tiducto/spider-sdk-typescript` and runs on Node 20+ or any runtime with a global `fetch`."
+  ]
+}
