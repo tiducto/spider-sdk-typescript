@@ -2,6 +2,6 @@ import type { PlanConnectionVariables } from './PlanConnectionVariables.ts';
 
 export interface PlanConnectionRequest {
   /** Persisted-query id (lowercase hex SHA-256 of the canonical query). */
-  id: 'f19608964d423831b485ccc878cb25eff56c720585d4423ee617c864e2b3102e' | (string & {});
+  id: 'a0cc636086f0cb10bea736a4977961afaa245a26cb3f8d23352a74c1f6ba9857' | (string & {});
   variables: PlanConnectionVariables;
 }
