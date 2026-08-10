@@ -1,6 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { Location, SpiderClient, SpiderContractMismatchError } from '../src/index.ts';
+import { CONTRACT_VERSION } from '../src/contract.ts';
+import { PLAN } from '../src/persistedQueries.ts';
 import { mockFetch } from './support.ts';
 
 const PLAN_ENVELOPE = {
@@ -57,10 +59,10 @@ test('plan posts the persisted query and maps the route', async () => {
   assert.equal(call.url, 'https://brno.api.tiducto.eu/routing/plan');
   assert.equal(call.method, 'POST');
   assert.equal(call.headers.get('apikey'), 'k');
-  assert.equal(call.headers.get('x-spider-contract-version'), '2.2');
+  assert.equal(call.headers.get('x-spider-contract-version'), CONTRACT_VERSION);
 
   const body = JSON.parse(call.body);
-  assert.equal(body.id, 'f19608964d423831b485ccc878cb25eff56c720585d4423ee617c864e2b3102e');
+  assert.equal(body.id, PLAN.id);
   assert.equal(body.variables.first, 3);
   assert.deepEqual(body.variables.origin, { location: { coordinate: { latitude: 49.19, longitude: 16.61 } } });
   assert.ok(typeof body.variables.dateTime.earliestDeparture === 'string');
@@ -208,7 +210,9 @@ test('upstream GraphQL errors become a failure result', async () => {
 });
 
 test('a contract-version mismatch throws instead of returning a result', async () => {
-  const mock = mockFetch({ json: PLAN_ENVELOPE, headers: { 'x-spider-contract-version': '3.0.0' } });
+  // A different MAJOR than the SDK's contract — always a genuine mismatch, whatever the current version.
+  const otherMajor = `${Number(CONTRACT_VERSION.split('.')[0]) + 1}.0.0`;
+  const mock = mockFetch({ json: PLAN_ENVELOPE, headers: { 'x-spider-contract-version': otherMajor } });
   const client = new SpiderClient('https://x', 'k', { fetch: mock.fetch });
   await assert.rejects(
     client.routing.plan({ origin: Location.coordinate(1, 2), destination: Location.coordinate(3, 4) }),
