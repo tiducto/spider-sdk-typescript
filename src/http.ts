@@ -54,7 +54,10 @@ export class Transport {
   constructor(baseUrl: string, apiKey: string, options?: TransportOptions) {
     this.baseUrl = baseUrl.replace(/\/+$/, '');
     this.apiKey = apiKey;
-    this.doFetch = options?.fetch ?? fetch;
+    // Bind the default to the global: calling `this.doFetch(...)` otherwise invokes native fetch
+    // with the Transport as receiver, which browsers reject with "Illegal invocation" (Node's
+    // fetch is lenient, so this only surfaces in the browser).
+    this.doFetch = options?.fetch ?? fetch.bind(globalThis);
     this.timeoutMs = options?.timeoutMs ?? 30_000;
     this.retry = options?.retry;
   }
