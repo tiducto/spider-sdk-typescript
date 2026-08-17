@@ -137,10 +137,10 @@ export interface PlanOptions {
   /** Absolute cap on transfers in any returned itinerary. Undefined = OTP default. */
   readonly maxTransfers?: number;
   /**
-   * Search window in seconds (default 1h). Always sent, deliberately not OTP's dynamic route-dependent
+   * Search window in minutes (default 60). Always sent, deliberately not OTP's dynamic route-dependent
    * window — predictable cost + paging. Widen for sparse/intercity routes.
    */
-  readonly searchWindowSeconds?: number;
+  readonly searchWindowMinutes?: number;
   /** Prefer wheelchair-accessible routing. */
   readonly wheelchairAccessible?: boolean;
 }
@@ -151,7 +151,7 @@ export interface DeparturesOptions {
 }
 
 const DEFAULT_FIRST = 5;
-const DEFAULT_SEARCH_WINDOW_SECONDS = 60 * 60;
+const DEFAULT_SEARCH_WINDOW_MINUTES = 60;
 const DEFAULT_TIME_RANGE_SECONDS = 24 * 60 * 60;
 const INT_MAX = 2_147_483_647;
 
@@ -174,7 +174,7 @@ interface RouteRequest {
   readonly via: readonly ViaLocation[];
   readonly allowedTransitModes: readonly TransitMode[];
   readonly maxTransfers?: number;
-  readonly searchWindowSeconds: number;
+  readonly searchWindowMinutes: number;
   readonly wheelchairAccessible: boolean;
 }
 
@@ -199,7 +199,7 @@ export class SpiderRouting {
       via: options.via ?? [],
       allowedTransitModes: options.allowedTransitModes ?? [],
       maxTransfers: options.maxTransfers,
-      searchWindowSeconds: options.searchWindowSeconds ?? DEFAULT_SEARCH_WINDOW_SECONDS,
+      searchWindowMinutes: options.searchWindowMinutes ?? DEFAULT_SEARCH_WINDOW_MINUTES,
       wheelchairAccessible: options.wheelchairAccessible ?? false,
     };
     return this.page(request, options.first ?? DEFAULT_FIRST);
@@ -289,7 +289,8 @@ export class SpiderRouting {
       via: request.via.length > 0 ? request.via.map(viaToInput) : undefined,
       modes: modesInput(request.allowedTransitModes),
       preferences: preferencesInput(request),
-      searchWindow: `PT${request.searchWindowSeconds}S`,
+      // Floor to a whole minute, min 1 — a sub-minute window returns almost nothing on OTP.
+      searchWindow: `PT${Math.max(1, Math.floor(request.searchWindowMinutes))}M`,
       first,
       last,
       before,

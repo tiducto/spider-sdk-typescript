@@ -233,7 +233,7 @@ test('plan maps modes, transfers, wheelchair, and search window to OTP inputs', 
     allowedTransitModes: ['BUS', 'TRAM', 'WALK'],
     maxTransfers: 2,
     wheelchairAccessible: true,
-    searchWindowSeconds: 1800,
+    searchWindowMinutes: 30,
   });
 
   const body = JSON.parse(mock.calls[0].body);
@@ -242,7 +242,7 @@ test('plan maps modes, transfers, wheelchair, and search window to OTP inputs', 
     transit: { transfer: { maximumTransfers: 2 } },
     accessibility: { wheelchair: { enabled: true } },
   });
-  assert.equal(body.variables.searchWindow, 'PT1800S');
+  assert.equal(body.variables.searchWindow, 'PT30M');
 });
 
 test('plan omits modes/preferences with no filters and defaults the 1h search window', async () => {
@@ -254,7 +254,7 @@ test('plan omits modes/preferences with no filters and defaults the 1h search wi
   const body = JSON.parse(mock.calls[0].body);
   assert.equal(body.variables.modes, undefined);
   assert.equal(body.variables.preferences, undefined);
-  assert.equal(body.variables.searchWindow, 'PT3600S');
+  assert.equal(body.variables.searchWindow, 'PT60M');
 });
 
 test('previousPage pages backward with last + before, not first', async () => {
