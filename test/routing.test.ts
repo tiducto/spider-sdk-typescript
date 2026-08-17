@@ -257,7 +257,7 @@ test('plan omits modes/preferences with no filters and defaults the 1h search wi
   assert.equal(body.variables.searchWindow, 'PT60M');
 });
 
-test('previousPage pages backward with last + before, not first', async () => {
+test('planPrevious pages backward with last + before, not first', async () => {
   const envelope = structuredClone(PLAN_ENVELOPE);
   envelope.data.planConnection.pageInfo.hasPreviousPage = true;
   const mock = mockFetch({ json: envelope });
@@ -265,7 +265,7 @@ test('previousPage pages backward with last + before, not first', async () => {
 
   const first = await client.routing.plan({ origin: Location.stop('1:U1'), destination: Location.stop('1:U2') });
   if (!first.isSuccess) throw new Error('expected success');
-  await client.routing.previousPage(first.data, 7);
+  await client.routing.planPrevious(first.data, 7);
 
   const body = JSON.parse(mock.calls[1].body);
   assert.equal(body.variables.last, 7);

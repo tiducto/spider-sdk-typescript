@@ -167,7 +167,7 @@ interface RouteTimeSpec {
   readonly epochMs: number;
 }
 
-interface RouteRequest {
+interface PlanRequest {
   readonly origin: Location;
   readonly destination: Location;
   readonly time: RouteTimeSpec;
@@ -179,7 +179,7 @@ interface RouteRequest {
 }
 
 const ROUTE_REQUEST = Symbol('spider.routeRequest');
-type RouteWithRequest = Route & { readonly [ROUTE_REQUEST]: RouteRequest };
+type RouteWithRequest = Route & { readonly [ROUTE_REQUEST]: PlanRequest };
 
 export class SpiderRouting {
   private readonly transport: Transport;
@@ -192,7 +192,7 @@ export class SpiderRouting {
     const time: RouteTimeSpec = options.arriveBy != null
       ? { kind: 'arriveBy', epochMs: toEpochMs(options.arriveBy) }
       : { kind: 'departAt', epochMs: toEpochMs(options.departAt ?? Date.now()) };
-    const request: RouteRequest = {
+    const request: PlanRequest = {
       origin: options.origin,
       destination: options.destination,
       time,
@@ -205,13 +205,13 @@ export class SpiderRouting {
     return this.page(request, options.first ?? DEFAULT_FIRST);
   }
 
-  async nextPage(route: Route, first: number = DEFAULT_FIRST): Promise<SpiderResult<Route> | null> {
+  async planNext(route: Route, first: number = DEFAULT_FIRST): Promise<SpiderResult<Route> | null> {
     if (!route.pageInfo.hasNextPage) return null;
     // Forward paging = first + after.
     return this.page(requestOf(route), first, undefined, undefined, route.pageInfo.endCursor ?? undefined);
   }
 
-  async previousPage(route: Route, last: number = DEFAULT_FIRST): Promise<SpiderResult<Route> | null> {
+  async planPrevious(route: Route, last: number = DEFAULT_FIRST): Promise<SpiderResult<Route> | null> {
     if (!route.pageInfo.hasPreviousPage) return null;
     // Backward paging = last + before (Relay-correct), not first + before.
     return this.page(requestOf(route), undefined, last, route.pageInfo.startCursor ?? undefined, undefined);
@@ -257,7 +257,7 @@ export class SpiderRouting {
   }
 
   private async page(
-    request: RouteRequest,
+    request: PlanRequest,
     first?: number,
     last?: number,
     before?: string,
@@ -272,7 +272,7 @@ export class SpiderRouting {
   }
 
   private async fetchPlan(
-    request: RouteRequest,
+    request: PlanRequest,
     first?: number,
     last?: number,
     before?: string,
@@ -321,7 +321,7 @@ export class SpiderRouting {
   }
 }
 
-function requestOf(route: Route): RouteRequest {
+function requestOf(route: Route): PlanRequest {
   return (route as RouteWithRequest)[ROUTE_REQUEST];
 }
 
@@ -356,7 +356,7 @@ function viaToInput(via: ViaLocation): PlanViaLocationInput {
   };
 }
 
-// Curated RouteRequest → OTP's nested modes/preferences inputs. Only the exposed fields are set; everything
+// Curated PlanRequest → OTP's nested modes/preferences inputs. Only the exposed fields are set; everything
 // else stays undefined so OTP applies its own defaults. Both return undefined when nothing is requested.
 function modesInput(modes: readonly TransitMode[]): PlanModesInput | undefined {
   const transit = modes
@@ -365,7 +365,7 @@ function modesInput(modes: readonly TransitMode[]): PlanModesInput | undefined {
   return transit.length > 0 ? { transit: { transit } } : undefined;
 }
 
-function preferencesInput(request: RouteRequest): PlanPreferencesInput | undefined {
+function preferencesInput(request: PlanRequest): PlanPreferencesInput | undefined {
   const transit = request.maxTransfers != null
     ? { transfer: { maximumTransfers: request.maxTransfers } }
     : undefined;

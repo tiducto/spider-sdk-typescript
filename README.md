@@ -46,14 +46,15 @@ All three surfaces are available on the client instance — there is no install 
 ### Routing — `client.routing`
 
 ```ts
-client.routing.plan({ origin, destination, first?, departAt?, arriveBy?, via? }); // → SpiderResult<Route>
-client.routing.nextPage(route);                                                   // → SpiderResult<Route> | null
-client.routing.previousPage(route);                                               // → SpiderResult<Route> | null
+client.routing.plan({ origin, destination, first?, departAt?, arriveBy?, via?,
+  allowedTransitModes?, maxTransfers?, searchWindowMinutes?, wheelchairAccessible? }); // → SpiderResult<Route>
+client.routing.planNext(route);                                                   // → SpiderResult<Route> | null
+client.routing.planPrevious(route);                                               // → SpiderResult<Route> | null
 client.routing.departures(stopId, numberOfDepartures?);                           // → SpiderResult<Departure[]>
 client.routing.trip(tripId, serviceDate?);                                        // → SpiderResult<TripDetails>
 ```
 
-An origin or destination is a `Location` — either `Location.coordinate(lat, lon)` or `Location.stop(id)`. By default `plan` searches from now; pass `departAt` (epoch ms or `Date`) for a future departure, or `arriveBy` to plan backwards from an arrival time. Results come back as `edges`, each with an `itinerary` (`start`, `end`, `durationSeconds`, `numberOfTransfers`, `legs`); page through with `nextPage`/`previousPage`.
+An origin or destination is a `Location` — either `Location.coordinate(lat, lon)` or `Location.stop(id)`. By default `plan` searches from now; pass `departAt` (epoch ms or `Date`) for a future departure, or `arriveBy` to plan backwards from an arrival time. Narrow the search with `allowedTransitModes` (e.g. `['BUS', 'TRAM']`), `maxTransfers`, `wheelchairAccessible`, or a wider `searchWindowMinutes` (default 60). Results come back as `edges`, each with an `itinerary` (`start`, `end`, `durationSeconds`, `numberOfTransfers`, `legs`); page through with `planNext`/`planPrevious`.
 
 ### Stops — `client.stops`
 
