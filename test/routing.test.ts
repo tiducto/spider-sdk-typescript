@@ -221,3 +221,113 @@ test('a contract-version mismatch throws instead of returning a result', async (
     (err) => err instanceof SpiderContractMismatchError,
   );
 });
+
+test('plan maps modes, transfers, wheelchair, and search window to OTP inputs', async () => {
+  const mock = mockFetch({ json: PLAN_ENVELOPE });
+  const client = new SpiderClient('https://x', 'k', { fetch: mock.fetch });
+
+  await client.routing.plan({
+    origin: Location.coordinate(49.19, 16.61),
+    destination: Location.coordinate(49.23, 16.53),
+    // WALK is a street mode, not a transit filter — it must drop out, leaving BUS + TRAM.
+    allowedTransitModes: ['BUS', 'TRAM', 'WALK'],
+    maxTransfers: 2,
+    wheelchairAccessible: true,
+    searchWindowMinutes: 30,
+  });
+
+  const body = JSON.parse(mock.calls[0].body);
+  assert.deepEqual(body.variables.modes, { transit: { transit: [{ mode: 'BUS' }, { mode: 'TRAM' }] } });
+  assert.deepEqual(body.variables.preferences, {
+    transit: { transfer: { maximumTransfers: 2 } },
+    accessibility: { wheelchair: { enabled: true } },
+  });
+  assert.equal(body.variables.searchWindow, 'PT30M');
+});
+
+test('plan omits modes/preferences with no filters and defaults the 1h search window', async () => {
+  const mock = mockFetch({ json: PLAN_ENVELOPE });
+  const client = new SpiderClient('https://x', 'k', { fetch: mock.fetch });
+
+  await client.routing.plan({ origin: Location.stop('1:U1'), destination: Location.stop('1:U2') });
+
+  const body = JSON.parse(mock.calls[0].body);
+  assert.equal(body.variables.modes, undefined);
+  assert.equal(body.variables.preferences, undefined);
+  assert.equal(body.variables.searchWindow, 'PT60M');
+});
+
+test('planPrevious pages backward with last + before, not first', async () => {
+  const envelope = structuredClone(PLAN_ENVELOPE);
+  envelope.data.planConnection.pageInfo.hasPreviousPage = true;
+  const mock = mockFetch({ json: envelope });
+  const client = new SpiderClient('https://x', 'k', { fetch: mock.fetch });
+
+  const first = await client.routing.plan({ origin: Location.stop('1:U1'), destination: Location.stop('1:U2') });
+  if (!first.isSuccess) throw new Error('expected success');
+  await client.routing.planPrevious(first.data, 7);
+
+  const body = JSON.parse(mock.calls[1].body);
+  assert.equal(body.variables.last, 7);
+  assert.equal(body.variables.before, 'c1');
+  assert.equal(body.variables.first, undefined);
+  assert.equal(body.variables.after, undefined);
+});
+
+function pageEnvelope(cursor: string, hasNextPage: boolean) {
+  const env = structuredClone(PLAN_ENVELOPE);
+  env.data.planConnection.edges[0].cursor = cursor;
+  env.data.planConnection.pageInfo = {
+    startCursor: cursor, endCursor: cursor, hasNextPage, hasPreviousPage: false, searchWindowUsed: 'PT1H',
+  };
+  return env;
+}
+
+test('planUntil steps forward until it reaches targetResults', async () => {
+  const mock = mockFetch(() => ({ json: pageEnvelope('p', true) })); // 1 itinerary per step
+  const client = new SpiderClient('https://x', 'k', { fetch: mock.fetch });
+
+  const steps = [];
+  for await (const res of client.routing.planUntil({
+    origin: Location.stop('1:U1'), destination: Location.stop('1:U2'), targetResults: 2,
+  })) {
+    if (res.isSuccess) steps.push(res.data);
+  }
+  assert.equal(steps.length, 2); // 1 itinerary/step, target 2 → 2 steps
+  assert.equal(mock.calls.length, 2);
+  // each step pulls a whole window (a high first), not a small page
+  assert.equal(JSON.parse(mock.calls[0].body).variables.first, 50);
+  // and it walks forward with after = the previous step's endCursor
+  assert.equal(JSON.parse(mock.calls[1].body).variables.after, 'p');
+});
+
+test('planUntil is lazy — breaking after the first step runs a single fetch', async () => {
+  const mock = mockFetch(() => ({ json: pageEnvelope('p', true) }));
+  const client = new SpiderClient('https://x', 'k', { fetch: mock.fetch });
+
+  for await (const res of client.routing.planUntil({
+    origin: Location.stop('1:U1'), destination: Location.stop('1:U2'), targetResults: 1000,
+  })) {
+    assert.ok(res.isSuccess);
+    break;
+  }
+  assert.equal(mock.calls.length, 1);
+});
+
+test('planUntil stops at the maxTraversal budget before reaching targetResults', async () => {
+  const mock = mockFetch(() => ({ json: pageEnvelope('p', true) })); // 1 itinerary/step, never enough
+  const client = new SpiderClient('https://x', 'k', { fetch: mock.fetch });
+
+  const steps = [];
+  for await (const res of client.routing.planUntil({
+    origin: Location.stop('1:U1'),
+    destination: Location.stop('1:U2'),
+    targetResults: 1000,
+    searchWindowMinutes: 60,
+    maxTraversalMinutes: 180,
+  })) {
+    if (res.isSuccess) steps.push(res.data);
+  }
+  assert.equal(steps.length, 3); // 180 / 60 = 3 steps
+  assert.equal(mock.calls.length, 3);
+});

@@ -2,9 +2,9 @@ import type { Geometry } from './Geometry.ts';
 import type { LegTime } from './LegTime.ts';
 import type { Mode } from './Mode.ts';
 import type { Place } from './Place.ts';
-import type { PlanConnectionRoute } from './PlanConnectionRoute.ts';
-import type { PlanConnectionTrip } from './PlanConnectionTrip.ts';
 import type { RealtimeState } from './RealtimeState.ts';
+import type { Route } from './Route.ts';
+import type { Trip } from './Trip.ts';
 
 export interface Leg {
   mode?: Mode;
@@ -14,11 +14,11 @@ export interface Leg {
   realTime?: boolean;
   from: Place;
   to: Place;
-  route?: PlanConnectionRoute;
+  route?: Route;
   headsign?: string;
   distance?: number;
   duration?: number;
   accessibilityScore?: number;
-  trip?: PlanConnectionTrip;
+  trip?: Trip;
   legGeometry?: Geometry;
 }

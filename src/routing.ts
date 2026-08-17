@@ -10,6 +10,8 @@ import { DEPARTURES, PLAN, TRIP } from './persistedQueries.ts';
 import type {
   PlanConnectionData as PlanConnectionDataWire,
   PlanConnectionVariables,
+  PlanModesInput,
+  PlanPreferencesInput,
   RoutingErrorCode,
   InputField,
   Itinerary as ItineraryWire,
@@ -18,8 +20,9 @@ import type {
   PlanViaLocationInput,
   StopDeparturesData as StopDeparturesDataWire,
   StopDeparturesVariables,
-  Stop as DeparturesStopWire,
+  StopDeparturesStop as DeparturesStopWire,
   RealtimeState,
+  TransitMode as WireTransitMode,
   TripData as TripDataWire,
   TripVariables,
   TripTrip as TripTripWire,
@@ -129,6 +132,31 @@ export interface PlanOptions {
   readonly departAt?: number | Date;
   readonly arriveBy?: number | Date;
   readonly via?: readonly ViaLocation[];
+  /** Restrict routing to these transit modes. Undefined/empty = no filter (all modes); WALK/UNKNOWN drop out. */
+  readonly allowedTransitModes?: readonly TransitMode[];
+  /** Absolute cap on transfers in any returned itinerary. Undefined = OTP default. */
+  readonly maxTransfers?: number;
+  /**
+   * Search window in minutes (default 60). Always sent, deliberately not OTP's dynamic route-dependent
+   * window — predictable cost + paging. Widen for sparse/intercity routes.
+   */
+  readonly searchWindowMinutes?: number;
+  /** Prefer wheelchair-accessible routing. */
+  readonly wheelchairAccessible?: boolean;
+}
+
+/** Options for the streaming `planUntil` — the plan filters plus the walk's bounds. `searchWindowMinutes` is the step. */
+export interface PlanStreamOptions extends Omit<PlanOptions, 'first'> {
+  /** Stop once ~this many itineraries have been collected (soft — the window that reaches it is yielded whole). */
+  readonly targetResults?: number;
+  /** Stop after stepping through this much total time (default 360 = 6h). `searchWindowMinutes` is the step size. */
+  readonly maxTraversalMinutes?: number;
+}
+
+/** Bounds for the streaming continuations `planNextUntil` / `planPreviousUntil` (the step is fixed from `prev`). */
+export interface PlanStreamPageOptions {
+  readonly targetResults?: number;
+  readonly maxTraversalMinutes?: number;
 }
 
 export interface DeparturesOptions {
@@ -137,23 +165,40 @@ export interface DeparturesOptions {
 }
 
 const DEFAULT_FIRST = 5;
+const DEFAULT_SEARCH_WINDOW_MINUTES = 60;
+const DEFAULT_MAX_TRAVERSAL_MINUTES = 360;
+const DEFAULT_TARGET_RESULTS = 10;
+// High per-step cap so each step pulls a whole window (OTP's cursor then advances a full window). `first` is
+// a per-search cap, not cursor-locked, so it can be high without changing the step size.
+const MAX_RESULTS_PER_STEP = 50;
 const DEFAULT_TIME_RANGE_SECONDS = 24 * 60 * 60;
 const INT_MAX = 2_147_483_647;
+
+// The OTP transit modes valid in a modes filter — the public TransitMode union also carries street/leg
+// values (WALK, BICYCLE, CAR, TRANSIT, UNKNOWN) that are not transit modes and must not reach the wire.
+const WIRE_TRANSIT_MODES: ReadonlySet<string> = new Set([
+  'AIRPLANE', 'BUS', 'CABLE_CAR', 'CARPOOL', 'COACH', 'FERRY', 'FUNICULAR', 'GONDOLA',
+  'MONORAIL', 'RAIL', 'SNOW_AND_ICE', 'SUBWAY', 'TAXI', 'TRAM', 'TROLLEYBUS',
+]);
 
 interface RouteTimeSpec {
   readonly kind: 'departAt' | 'arriveBy';
   readonly epochMs: number;
 }
 
-interface RouteRequest {
+interface PlanRequest {
   readonly origin: Location;
   readonly destination: Location;
   readonly time: RouteTimeSpec;
   readonly via: readonly ViaLocation[];
+  readonly allowedTransitModes: readonly TransitMode[];
+  readonly maxTransfers?: number;
+  readonly searchWindowMinutes: number;
+  readonly wheelchairAccessible: boolean;
 }
 
 const ROUTE_REQUEST = Symbol('spider.routeRequest');
-type RouteWithRequest = Route & { readonly [ROUTE_REQUEST]: RouteRequest };
+type RouteWithRequest = Route & { readonly [ROUTE_REQUEST]: PlanRequest };
 
 export class SpiderRouting {
   private readonly transport: Transport;
@@ -166,23 +211,91 @@ export class SpiderRouting {
     const time: RouteTimeSpec = options.arriveBy != null
       ? { kind: 'arriveBy', epochMs: toEpochMs(options.arriveBy) }
       : { kind: 'departAt', epochMs: toEpochMs(options.departAt ?? Date.now()) };
-    const request: RouteRequest = {
+    const request: PlanRequest = {
       origin: options.origin,
       destination: options.destination,
       time,
       via: options.via ?? [],
+      allowedTransitModes: options.allowedTransitModes ?? [],
+      maxTransfers: options.maxTransfers,
+      searchWindowMinutes: options.searchWindowMinutes ?? DEFAULT_SEARCH_WINDOW_MINUTES,
+      wheelchairAccessible: options.wheelchairAccessible ?? false,
     };
     return this.page(request, options.first ?? DEFAULT_FIRST);
   }
 
-  async nextPage(route: Route, first: number = DEFAULT_FIRST): Promise<SpiderResult<Route> | null> {
+  async planNext(route: Route, first: number = DEFAULT_FIRST): Promise<SpiderResult<Route> | null> {
     if (!route.pageInfo.hasNextPage) return null;
-    return this.page(requestOf(route), first, undefined, route.pageInfo.endCursor ?? undefined);
+    // Forward paging = first + after.
+    return this.page(requestOf(route), first, undefined, undefined, route.pageInfo.endCursor ?? undefined);
   }
 
-  async previousPage(route: Route, first: number = DEFAULT_FIRST): Promise<SpiderResult<Route> | null> {
+  async planPrevious(route: Route, last: number = DEFAULT_FIRST): Promise<SpiderResult<Route> | null> {
     if (!route.pageInfo.hasPreviousPage) return null;
-    return this.page(requestOf(route), first, route.pageInfo.startCursor ?? undefined, undefined);
+    // Backward paging = last + before (Relay-correct), not first + before.
+    return this.page(requestOf(route), undefined, last, route.pageInfo.startCursor ?? undefined, undefined);
+  }
+
+  /**
+   * Streams itineraries by stepping the search forward one search window at a time, until `targetResults`
+   * itineraries have been collected or `maxTraversalMinutes` of time has been traversed. Each step pulls a
+   * whole window in one search, so a busy window yields more — `targetResults` is a soft floor, the window
+   * that reaches it is yielded whole. Lazy: `for await ... break` stops stepping and skips the remaining OTP
+   * searches. Each yield is one step's `SpiderResult` (a terminal error ends the stream), matching the
+   * non-throwing poll helpers.
+   *
+   * The step is `searchWindowMinutes` and it is fixed for the whole walk — OTP locks the window into the
+   * paging cursor after the first search and ignores it thereafter, so a wider step means a wider
+   * `searchWindowMinutes` here, not on a continuation.
+   */
+  async *planUntil(options: PlanStreamOptions): AsyncGenerator<SpiderResult<Route>> {
+    const { targetResults, maxTraversalMinutes, ...planOptions } = options;
+    const target = targetResults ?? DEFAULT_TARGET_RESULTS;
+    const steps = stepCount(
+      maxTraversalMinutes ?? DEFAULT_MAX_TRAVERSAL_MINUTES,
+      options.searchWindowMinutes ?? DEFAULT_SEARCH_WINDOW_MINUTES,
+    );
+    const first = await this.plan({ ...planOptions, first: MAX_RESULTS_PER_STEP });
+    yield first;
+    if (!first.isSuccess) return;
+    yield* this.stepFrom(first.data, 'forward', steps - 1, target, first.data.edges.length);
+  }
+
+  /** Streaming form of `planNext`: steps forward from `prev`, one (fixed) search window per step. */
+  async *planNextUntil(prev: Route, options?: PlanStreamPageOptions): AsyncGenerator<SpiderResult<Route>> {
+    const steps = stepCount(options?.maxTraversalMinutes ?? DEFAULT_MAX_TRAVERSAL_MINUTES, requestOf(prev).searchWindowMinutes);
+    yield* this.stepFrom(prev, 'forward', steps, options?.targetResults ?? DEFAULT_TARGET_RESULTS, 0);
+  }
+
+  /** Streaming form of `planPrevious`: steps backward from `prev`, one (fixed) search window per step. */
+  async *planPreviousUntil(prev: Route, options?: PlanStreamPageOptions): AsyncGenerator<SpiderResult<Route>> {
+    const steps = stepCount(options?.maxTraversalMinutes ?? DEFAULT_MAX_TRAVERSAL_MINUTES, requestOf(prev).searchWindowMinutes);
+    yield* this.stepFrom(prev, 'backward', steps, options?.targetResults ?? DEFAULT_TARGET_RESULTS, 0);
+  }
+
+  // Step from `start` one search window at a time, accumulating itinerary count. Stop at `targetResults`, when a
+  // step has no next page, or on an error. `collectedSoFar` seeds the count (planUntil already yielded step 1).
+  private async *stepFrom(
+    start: Route,
+    direction: 'forward' | 'backward',
+    remainingSteps: number,
+    targetResults: number,
+    collectedSoFar: number,
+  ): AsyncGenerator<SpiderResult<Route>> {
+    if (collectedSoFar >= targetResults) return;
+    let prev = start;
+    let collected = collectedSoFar;
+    for (let i = 0; i < Math.max(0, remainingSteps); i++) {
+      const res = direction === 'forward'
+        ? await this.planNext(prev, MAX_RESULTS_PER_STEP)
+        : await this.planPrevious(prev, MAX_RESULTS_PER_STEP);
+      if (res === null) return;
+      yield res;
+      if (!res.isSuccess) return;
+      collected += res.data.edges.length;
+      if (collected >= targetResults) return;
+      prev = res.data;
+    }
   }
 
   async departures(
@@ -225,13 +338,14 @@ export class SpiderRouting {
   }
 
   private async page(
-    request: RouteRequest,
+    request: PlanRequest,
     first?: number,
+    last?: number,
     before?: string,
     after?: string,
   ): Promise<SpiderResult<Route>> {
     try {
-      return success(await this.fetchPlan(request, first, before, after));
+      return success(await this.fetchPlan(request, first, last, before, after));
     } catch (e) {
       if (e instanceof SpiderContractMismatchError) throw e;
       return failure(toSpiderError(e));
@@ -239,8 +353,9 @@ export class SpiderRouting {
   }
 
   private async fetchPlan(
-    request: RouteRequest,
+    request: PlanRequest,
     first?: number,
+    last?: number,
     before?: string,
     after?: string,
   ): Promise<Route> {
@@ -253,7 +368,12 @@ export class SpiderRouting {
       origin: locationToInput(request.origin),
       destination: locationToInput(request.destination),
       via: request.via.length > 0 ? request.via.map(viaToInput) : undefined,
+      modes: modesInput(request.allowedTransitModes),
+      preferences: preferencesInput(request),
+      // Floor to a whole minute, min 1 — a sub-minute window returns almost nothing on OTP.
+      searchWindow: `PT${Math.max(1, Math.floor(request.searchWindowMinutes))}M`,
       first,
+      last,
       before,
       after,
     };
@@ -282,7 +402,7 @@ export class SpiderRouting {
   }
 }
 
-function requestOf(route: Route): RouteRequest {
+function requestOf(route: Route): PlanRequest {
   return (route as RouteWithRequest)[ROUTE_REQUEST];
 }
 
@@ -292,6 +412,12 @@ function toEpochMs(value: number | Date): number {
 
 function clampSeconds(seconds: number): number {
   return Math.max(0, Math.min(Math.floor(seconds), INT_MAX));
+}
+
+// Each cursor step advances a full (fixed) search window, so the number of steps to traverse the total time
+// is a plain division by the step — no searchWindowUsed math.
+function stepCount(maxTraversalMinutes: number, stepMinutes: number): number {
+  return Math.max(1, Math.floor(maxTraversalMinutes / Math.max(1, stepMinutes)));
 }
 
 function locationToInput(location: Location): PlanLabeledLocationInput {
@@ -315,6 +441,24 @@ function viaToInput(via: ViaLocation): PlanViaLocationInput {
       minimumWaitTime,
     },
   };
+}
+
+// Curated PlanRequest → OTP's nested modes/preferences inputs. Only the exposed fields are set; everything
+// else stays undefined so OTP applies its own defaults. Both return undefined when nothing is requested.
+function modesInput(modes: readonly TransitMode[]): PlanModesInput | undefined {
+  const transit = modes
+    .filter((m): m is WireTransitMode => WIRE_TRANSIT_MODES.has(m))
+    .map((mode) => ({ mode }));
+  return transit.length > 0 ? { transit: { transit } } : undefined;
+}
+
+function preferencesInput(request: PlanRequest): PlanPreferencesInput | undefined {
+  const transit = request.maxTransfers != null
+    ? { transfer: { maximumTransfers: request.maxTransfers } }
+    : undefined;
+  const accessibility = request.wheelchairAccessible ? { wheelchair: { enabled: true } } : undefined;
+  if (transit === undefined && accessibility === undefined) return undefined;
+  return { transit, accessibility };
 }
 
 function mapItinerary(node: ItineraryWire): Itinerary {

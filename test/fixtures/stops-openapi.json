@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Tiducto Transit API — Stops",
-    "version": "2.2",
+    "version": "5.0",
     "description": "Stop text/geo search — a plain-REST customer surface (key-auth). Companion to routing and realtime; the three share one pack version. Enum-ish fields are bare strings so unrecognized values pass through unchanged."
   },
   "servers": [
@@ -62,6 +62,16 @@
               }
             }
           },
+          "4XX": {
+            "description": "Stop-search error (e.g. filtering a non-filterable attribute).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StopSearchError"
+                }
+              }
+            }
+          },
           "403": {
             "description": "Forbidden — the key is not permitted for this operation.",
             "content": {
@@ -78,16 +88,6 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "description": "Stop-search error (e.g. filtering a non-filterable attribute).",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/StopSearchError"
                 }
               }
             }

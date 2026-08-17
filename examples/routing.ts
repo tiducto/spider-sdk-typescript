@@ -40,7 +40,7 @@ export async function laterItineraries(client: SpiderClient) {
     return
   }
 
-  const later = await client.routing.nextPage(firstPage.data, 3)
+  const later = await client.routing.planNext(firstPage.data, 3)
   if (later === null) {
     console.log('No later itineraries — that was the last page')
   } else if (later.isSuccess) {
