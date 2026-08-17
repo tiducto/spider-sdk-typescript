@@ -145,18 +145,18 @@ export interface PlanOptions {
   readonly wheelchairAccessible?: boolean;
 }
 
-/** Options for the streaming `planUntil` — the plan filters plus the stream's paging bounds. */
+/** Options for the streaming `planUntil` — the plan filters plus the walk's bounds. `searchWindowMinutes` is the step. */
 export interface PlanStreamOptions extends Omit<PlanOptions, 'first'> {
-  /** Stop paging once this much time has been searched (default 240 = 4h). Bounds a sparse route. */
-  readonly maxSearchWindowMinutes?: number;
-  /** Itineraries requested per page (default 5). */
-  readonly pageSize?: number;
+  /** Stop once ~this many itineraries have been collected (soft — the window that reaches it is yielded whole). */
+  readonly targetResults?: number;
+  /** Stop after stepping through this much total time (default 360 = 6h). `searchWindowMinutes` is the step size. */
+  readonly maxTraversalMinutes?: number;
 }
 
-/** Paging bounds for the streaming continuations `planNextUntil` / `planPreviousUntil`. */
+/** Bounds for the streaming continuations `planNextUntil` / `planPreviousUntil` (the step is fixed from `prev`). */
 export interface PlanStreamPageOptions {
-  readonly maxSearchWindowMinutes?: number;
-  readonly pageSize?: number;
+  readonly targetResults?: number;
+  readonly maxTraversalMinutes?: number;
 }
 
 export interface DeparturesOptions {
@@ -166,7 +166,11 @@ export interface DeparturesOptions {
 
 const DEFAULT_FIRST = 5;
 const DEFAULT_SEARCH_WINDOW_MINUTES = 60;
-const DEFAULT_MAX_WINDOW_MINUTES = 240;
+const DEFAULT_MAX_TRAVERSAL_MINUTES = 360;
+const DEFAULT_TARGET_RESULTS = 10;
+// High per-step cap so each step pulls a whole window (OTP's cursor then advances a full window). `first` is
+// a per-search cap, not cursor-locked, so it can be high without changing the step size.
+const MAX_RESULTS_PER_STEP = 50;
 const DEFAULT_TIME_RANGE_SECONDS = 24 * 60 * 60;
 const INT_MAX = 2_147_483_647;
 
@@ -233,51 +237,63 @@ export class SpiderRouting {
   }
 
   /**
-   * Streams itineraries page by page, extending the search forward until `maxSearchWindowMinutes` of time
-   * has been searched or OTP runs out of pages. Lazy: `for await ... break` stops paging and never runs the
-   * extra OTP searches. Each yield is one page's `SpiderResult` (a terminal error ends the stream), matching
-   * the non-throwing poll helpers. For a plain big batch, prefer one `plan` with a wider `searchWindowMinutes`.
+   * Streams itineraries by stepping the search forward one search window at a time, until `targetResults`
+   * itineraries have been collected or `maxTraversalMinutes` of time has been traversed. Each step pulls a
+   * whole window in one search, so a busy window yields more — `targetResults` is a soft floor, the window
+   * that reaches it is yielded whole. Lazy: `for await ... break` stops stepping and skips the remaining OTP
+   * searches. Each yield is one step's `SpiderResult` (a terminal error ends the stream), matching the
+   * non-throwing poll helpers.
+   *
+   * The step is `searchWindowMinutes` and it is fixed for the whole walk — OTP locks the window into the
+   * paging cursor after the first search and ignores it thereafter, so a wider step means a wider
+   * `searchWindowMinutes` here, not on a continuation.
    */
   async *planUntil(options: PlanStreamOptions): AsyncGenerator<SpiderResult<Route>> {
-    const { maxSearchWindowMinutes, pageSize, ...planOptions } = options;
-    const size = pageSize ?? DEFAULT_FIRST;
-    const budget = pageBudget(
-      maxSearchWindowMinutes ?? DEFAULT_MAX_WINDOW_MINUTES,
+    const { targetResults, maxTraversalMinutes, ...planOptions } = options;
+    const target = targetResults ?? DEFAULT_TARGET_RESULTS;
+    const steps = stepCount(
+      maxTraversalMinutes ?? DEFAULT_MAX_TRAVERSAL_MINUTES,
       options.searchWindowMinutes ?? DEFAULT_SEARCH_WINDOW_MINUTES,
     );
-    const first = await this.plan({ ...planOptions, first: size });
+    const first = await this.plan({ ...planOptions, first: MAX_RESULTS_PER_STEP });
     yield first;
     if (!first.isSuccess) return;
-    yield* this.pageFrom(first.data, 'forward', budget - 1, size);
+    yield* this.stepFrom(first.data, 'forward', steps - 1, target, first.data.edges.length);
   }
 
-  /** Streaming form of `planNext`: later departures continuing after `prev`, page by page. */
+  /** Streaming form of `planNext`: steps forward from `prev`, one (fixed) search window per step. */
   async *planNextUntil(prev: Route, options?: PlanStreamPageOptions): AsyncGenerator<SpiderResult<Route>> {
-    const budget = pageBudget(options?.maxSearchWindowMinutes ?? DEFAULT_MAX_WINDOW_MINUTES, requestOf(prev).searchWindowMinutes);
-    yield* this.pageFrom(prev, 'forward', budget, options?.pageSize ?? DEFAULT_FIRST);
+    const steps = stepCount(options?.maxTraversalMinutes ?? DEFAULT_MAX_TRAVERSAL_MINUTES, requestOf(prev).searchWindowMinutes);
+    yield* this.stepFrom(prev, 'forward', steps, options?.targetResults ?? DEFAULT_TARGET_RESULTS, 0);
   }
 
-  /** Streaming form of `planPrevious`: earlier departures before `prev`, page by page. */
+  /** Streaming form of `planPrevious`: steps backward from `prev`, one (fixed) search window per step. */
   async *planPreviousUntil(prev: Route, options?: PlanStreamPageOptions): AsyncGenerator<SpiderResult<Route>> {
-    const budget = pageBudget(options?.maxSearchWindowMinutes ?? DEFAULT_MAX_WINDOW_MINUTES, requestOf(prev).searchWindowMinutes);
-    yield* this.pageFrom(prev, 'backward', budget, options?.pageSize ?? DEFAULT_FIRST);
+    const steps = stepCount(options?.maxTraversalMinutes ?? DEFAULT_MAX_TRAVERSAL_MINUTES, requestOf(prev).searchWindowMinutes);
+    yield* this.stepFrom(prev, 'backward', steps, options?.targetResults ?? DEFAULT_TARGET_RESULTS, 0);
   }
 
-  // Yield successive pages from `start` in one direction. A null page (nothing more) or an error ends it.
-  private async *pageFrom(
+  // Step from `start` one search window at a time, accumulating itinerary count. Stop at `targetResults`, when a
+  // step has no next page, or on an error. `collectedSoFar` seeds the count (planUntil already yielded step 1).
+  private async *stepFrom(
     start: Route,
     direction: 'forward' | 'backward',
-    extraPages: number,
-    pageSize: number,
+    remainingSteps: number,
+    targetResults: number,
+    collectedSoFar: number,
   ): AsyncGenerator<SpiderResult<Route>> {
+    if (collectedSoFar >= targetResults) return;
     let prev = start;
-    for (let i = 0; i < Math.max(0, extraPages); i++) {
+    let collected = collectedSoFar;
+    for (let i = 0; i < Math.max(0, remainingSteps); i++) {
       const res = direction === 'forward'
-        ? await this.planNext(prev, pageSize)
-        : await this.planPrevious(prev, pageSize);
+        ? await this.planNext(prev, MAX_RESULTS_PER_STEP)
+        : await this.planPrevious(prev, MAX_RESULTS_PER_STEP);
       if (res === null) return;
       yield res;
       if (!res.isSuccess) return;
+      collected += res.data.edges.length;
+      if (collected >= targetResults) return;
       prev = res.data;
     }
   }
@@ -398,9 +414,10 @@ function clampSeconds(seconds: number): number {
   return Math.max(0, Math.min(Math.floor(seconds), INT_MAX));
 }
 
-// The fixed per-page window makes the max-window bound a deterministic page count — no searchWindowUsed math.
-function pageBudget(maxWindowMinutes: number, perPageMinutes: number): number {
-  return Math.max(1, Math.floor(maxWindowMinutes / Math.max(1, perPageMinutes)));
+// Each cursor step advances a full (fixed) search window, so the number of steps to traverse the total time
+// is a plain division by the step — no searchWindowUsed math.
+function stepCount(maxTraversalMinutes: number, stepMinutes: number): number {
+  return Math.max(1, Math.floor(maxTraversalMinutes / Math.max(1, stepMinutes)));
 }
 
 function locationToInput(location: Location): PlanLabeledLocationInput {

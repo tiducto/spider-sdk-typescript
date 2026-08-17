@@ -283,46 +283,51 @@ function pageEnvelope(cursor: string, hasNextPage: boolean) {
   return env;
 }
 
-test('planUntil streams pages forward until OTP reports no next page', async () => {
-  let n = 0;
-  const mock = mockFetch(() => ({ json: pageEnvelope(n === 0 ? 'p1' : 'p2', n++ === 0) }));
+test('planUntil steps forward until it reaches targetResults', async () => {
+  const mock = mockFetch(() => ({ json: pageEnvelope('p', true) })); // 1 itinerary per step
   const client = new SpiderClient('https://x', 'k', { fetch: mock.fetch });
 
-  const pages = [];
-  for await (const res of client.routing.planUntil({ origin: Location.stop('1:U1'), destination: Location.stop('1:U2') })) {
-    assert.ok(res.isSuccess);
-    pages.push(res.data);
+  const steps = [];
+  for await (const res of client.routing.planUntil({
+    origin: Location.stop('1:U1'), destination: Location.stop('1:U2'), targetResults: 2,
+  })) {
+    if (res.isSuccess) steps.push(res.data);
   }
-  assert.equal(pages.length, 2);
+  assert.equal(steps.length, 2); // 1 itinerary/step, target 2 → 2 steps
   assert.equal(mock.calls.length, 2);
-  // the second page walked forward with after = the first page's endCursor
-  assert.equal(JSON.parse(mock.calls[1].body).variables.after, 'p1');
+  // each step pulls a whole window (a high first), not a small page
+  assert.equal(JSON.parse(mock.calls[0].body).variables.first, 50);
+  // and it walks forward with after = the previous step's endCursor
+  assert.equal(JSON.parse(mock.calls[1].body).variables.after, 'p');
 });
 
-test('planUntil is lazy — breaking after the first page runs a single fetch', async () => {
-  const mock = mockFetch(() => ({ json: pageEnvelope('p', true) })); // hasNextPage forever
+test('planUntil is lazy — breaking after the first step runs a single fetch', async () => {
+  const mock = mockFetch(() => ({ json: pageEnvelope('p', true) }));
   const client = new SpiderClient('https://x', 'k', { fetch: mock.fetch });
 
-  for await (const res of client.routing.planUntil({ origin: Location.stop('1:U1'), destination: Location.stop('1:U2') })) {
+  for await (const res of client.routing.planUntil({
+    origin: Location.stop('1:U1'), destination: Location.stop('1:U2'), targetResults: 1000,
+  })) {
     assert.ok(res.isSuccess);
     break;
   }
   assert.equal(mock.calls.length, 1);
 });
 
-test('planUntil stops at the maxSearchWindow budget even when OTP always reports a next page', async () => {
-  const mock = mockFetch(() => ({ json: pageEnvelope('p', true) })); // OTP never terminates the walk
+test('planUntil stops at the maxTraversal budget before reaching targetResults', async () => {
+  const mock = mockFetch(() => ({ json: pageEnvelope('p', true) })); // 1 itinerary/step, never enough
   const client = new SpiderClient('https://x', 'k', { fetch: mock.fetch });
 
-  const pages = [];
+  const steps = [];
   for await (const res of client.routing.planUntil({
     origin: Location.stop('1:U1'),
     destination: Location.stop('1:U2'),
+    targetResults: 1000,
     searchWindowMinutes: 60,
-    maxSearchWindowMinutes: 180,
+    maxTraversalMinutes: 180,
   })) {
-    if (res.isSuccess) pages.push(res.data);
+    if (res.isSuccess) steps.push(res.data);
   }
-  assert.equal(pages.length, 3); // budget = 180 / 60 = 3 pages
+  assert.equal(steps.length, 3); // 180 / 60 = 3 steps
   assert.equal(mock.calls.length, 3);
 });
