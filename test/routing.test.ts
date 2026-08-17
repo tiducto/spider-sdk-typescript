@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { Location, SpiderClient, SpiderContractMismatchError } from '../src/index.ts';
 import { CONTRACT_VERSION } from '../src/contract.ts';
+import { SDK_IDENTITY } from '../src/sdk.ts';
 import { PLAN } from '../src/persistedQueries.ts';
 import { mockFetch } from './support.ts';
 
@@ -60,6 +61,7 @@ test('plan posts the persisted query and maps the route', async () => {
   assert.equal(call.method, 'POST');
   assert.equal(call.headers.get('apikey'), 'k');
   assert.equal(call.headers.get('x-spider-contract-version'), CONTRACT_VERSION);
+  assert.equal(call.headers.get('x-spider-sdk'), SDK_IDENTITY);
 
   const body = JSON.parse(call.body);
   assert.equal(body.id, PLAN.id);

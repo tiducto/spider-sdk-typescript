@@ -1,4 +1,5 @@
 import { CONTRACT_HEADER, CONTRACT_VERSION, checkContract } from './contract.ts';
+import { SDK_HEADER, SDK_IDENTITY } from './sdk.ts';
 import { DecodingError, TransportError, parseErrorEnvelope } from './errors.ts';
 
 export type FetchLike = typeof fetch;
@@ -127,6 +128,7 @@ export class Transport {
     const headers = new Headers(extra);
     headers.set('apikey', this.apiKey);
     headers.set(CONTRACT_HEADER, CONTRACT_VERSION);
+    headers.set(SDK_HEADER, SDK_IDENTITY);
     return headers;
   }
 
