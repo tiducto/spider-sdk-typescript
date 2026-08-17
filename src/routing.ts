@@ -10,6 +10,8 @@ import { DEPARTURES, PLAN, TRIP } from './persistedQueries.ts';
 import type {
   PlanConnectionData as PlanConnectionDataWire,
   PlanConnectionVariables,
+  PlanModesInput,
+  PlanPreferencesInput,
   RoutingErrorCode,
   InputField,
   Itinerary as ItineraryWire,
@@ -18,8 +20,9 @@ import type {
   PlanViaLocationInput,
   StopDeparturesData as StopDeparturesDataWire,
   StopDeparturesVariables,
-  Stop as DeparturesStopWire,
+  StopDeparturesStop as DeparturesStopWire,
   RealtimeState,
+  TransitMode as WireTransitMode,
   TripData as TripDataWire,
   TripVariables,
   TripTrip as TripTripWire,
@@ -129,6 +132,17 @@ export interface PlanOptions {
   readonly departAt?: number | Date;
   readonly arriveBy?: number | Date;
   readonly via?: readonly ViaLocation[];
+  /** Restrict routing to these transit modes. Undefined/empty = no filter (all modes); WALK/UNKNOWN drop out. */
+  readonly allowedTransitModes?: readonly TransitMode[];
+  /** Absolute cap on transfers in any returned itinerary. Undefined = OTP default. */
+  readonly maxTransfers?: number;
+  /**
+   * Search window in seconds (default 1h). Always sent, deliberately not OTP's dynamic route-dependent
+   * window — predictable cost + paging. Widen for sparse/intercity routes.
+   */
+  readonly searchWindowSeconds?: number;
+  /** Prefer wheelchair-accessible routing. */
+  readonly wheelchairAccessible?: boolean;
 }
 
 export interface DeparturesOptions {
@@ -137,8 +151,16 @@ export interface DeparturesOptions {
 }
 
 const DEFAULT_FIRST = 5;
+const DEFAULT_SEARCH_WINDOW_SECONDS = 60 * 60;
 const DEFAULT_TIME_RANGE_SECONDS = 24 * 60 * 60;
 const INT_MAX = 2_147_483_647;
+
+// The OTP transit modes valid in a modes filter — the public TransitMode union also carries street/leg
+// values (WALK, BICYCLE, CAR, TRANSIT, UNKNOWN) that are not transit modes and must not reach the wire.
+const WIRE_TRANSIT_MODES: ReadonlySet<string> = new Set([
+  'AIRPLANE', 'BUS', 'CABLE_CAR', 'CARPOOL', 'COACH', 'FERRY', 'FUNICULAR', 'GONDOLA',
+  'MONORAIL', 'RAIL', 'SNOW_AND_ICE', 'SUBWAY', 'TAXI', 'TRAM', 'TROLLEYBUS',
+]);
 
 interface RouteTimeSpec {
   readonly kind: 'departAt' | 'arriveBy';
@@ -150,6 +172,10 @@ interface RouteRequest {
   readonly destination: Location;
   readonly time: RouteTimeSpec;
   readonly via: readonly ViaLocation[];
+  readonly allowedTransitModes: readonly TransitMode[];
+  readonly maxTransfers?: number;
+  readonly searchWindowSeconds: number;
+  readonly wheelchairAccessible: boolean;
 }
 
 const ROUTE_REQUEST = Symbol('spider.routeRequest');
@@ -171,18 +197,24 @@ export class SpiderRouting {
       destination: options.destination,
       time,
       via: options.via ?? [],
+      allowedTransitModes: options.allowedTransitModes ?? [],
+      maxTransfers: options.maxTransfers,
+      searchWindowSeconds: options.searchWindowSeconds ?? DEFAULT_SEARCH_WINDOW_SECONDS,
+      wheelchairAccessible: options.wheelchairAccessible ?? false,
     };
     return this.page(request, options.first ?? DEFAULT_FIRST);
   }
 
   async nextPage(route: Route, first: number = DEFAULT_FIRST): Promise<SpiderResult<Route> | null> {
     if (!route.pageInfo.hasNextPage) return null;
-    return this.page(requestOf(route), first, undefined, route.pageInfo.endCursor ?? undefined);
+    // Forward paging = first + after.
+    return this.page(requestOf(route), first, undefined, undefined, route.pageInfo.endCursor ?? undefined);
   }
 
-  async previousPage(route: Route, first: number = DEFAULT_FIRST): Promise<SpiderResult<Route> | null> {
+  async previousPage(route: Route, last: number = DEFAULT_FIRST): Promise<SpiderResult<Route> | null> {
     if (!route.pageInfo.hasPreviousPage) return null;
-    return this.page(requestOf(route), first, route.pageInfo.startCursor ?? undefined, undefined);
+    // Backward paging = last + before (Relay-correct), not first + before.
+    return this.page(requestOf(route), undefined, last, route.pageInfo.startCursor ?? undefined, undefined);
   }
 
   async departures(
@@ -227,11 +259,12 @@ export class SpiderRouting {
   private async page(
     request: RouteRequest,
     first?: number,
+    last?: number,
     before?: string,
     after?: string,
   ): Promise<SpiderResult<Route>> {
     try {
-      return success(await this.fetchPlan(request, first, before, after));
+      return success(await this.fetchPlan(request, first, last, before, after));
     } catch (e) {
       if (e instanceof SpiderContractMismatchError) throw e;
       return failure(toSpiderError(e));
@@ -241,6 +274,7 @@ export class SpiderRouting {
   private async fetchPlan(
     request: RouteRequest,
     first?: number,
+    last?: number,
     before?: string,
     after?: string,
   ): Promise<Route> {
@@ -253,7 +287,11 @@ export class SpiderRouting {
       origin: locationToInput(request.origin),
       destination: locationToInput(request.destination),
       via: request.via.length > 0 ? request.via.map(viaToInput) : undefined,
+      modes: modesInput(request.allowedTransitModes),
+      preferences: preferencesInput(request),
+      searchWindow: `PT${request.searchWindowSeconds}S`,
       first,
+      last,
       before,
       after,
     };
@@ -315,6 +353,24 @@ function viaToInput(via: ViaLocation): PlanViaLocationInput {
       minimumWaitTime,
     },
   };
+}
+
+// Curated RouteRequest → OTP's nested modes/preferences inputs. Only the exposed fields are set; everything
+// else stays undefined so OTP applies its own defaults. Both return undefined when nothing is requested.
+function modesInput(modes: readonly TransitMode[]): PlanModesInput | undefined {
+  const transit = modes
+    .filter((m): m is WireTransitMode => WIRE_TRANSIT_MODES.has(m))
+    .map((mode) => ({ mode }));
+  return transit.length > 0 ? { transit: { transit } } : undefined;
+}
+
+function preferencesInput(request: RouteRequest): PlanPreferencesInput | undefined {
+  const transit = request.maxTransfers != null
+    ? { transfer: { maximumTransfers: request.maxTransfers } }
+    : undefined;
+  const accessibility = request.wheelchairAccessible ? { wheelchair: { enabled: true } } : undefined;
+  if (transit === undefined && accessibility === undefined) return undefined;
+  return { transit, accessibility };
 }
 
 function mapItinerary(node: ItineraryWire): Itinerary {

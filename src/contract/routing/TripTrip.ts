@@ -1,6 +1,6 @@
 import type { BikesAllowed } from './BikesAllowed.ts';
-import type { Route } from './Route.ts';
 import type { TripGeometry } from './TripGeometry.ts';
+import type { TripRoute } from './TripRoute.ts';
 import type { TripStoptime } from './TripStoptime.ts';
 
 export interface TripTrip {
@@ -8,7 +8,7 @@ export interface TripTrip {
   directionId?: string;
   tripHeadsign?: string;
   bikesAllowed?: BikesAllowed;
-  route: Route;
+  route: TripRoute;
   stoptimesForDate?: TripStoptime[];
   tripGeometry?: TripGeometry;
 }

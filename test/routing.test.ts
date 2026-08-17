@@ -221,3 +221,55 @@ test('a contract-version mismatch throws instead of returning a result', async (
     (err) => err instanceof SpiderContractMismatchError,
   );
 });
+
+test('plan maps modes, transfers, wheelchair, and search window to OTP inputs', async () => {
+  const mock = mockFetch({ json: PLAN_ENVELOPE });
+  const client = new SpiderClient('https://x', 'k', { fetch: mock.fetch });
+
+  await client.routing.plan({
+    origin: Location.coordinate(49.19, 16.61),
+    destination: Location.coordinate(49.23, 16.53),
+    // WALK is a street mode, not a transit filter — it must drop out, leaving BUS + TRAM.
+    allowedTransitModes: ['BUS', 'TRAM', 'WALK'],
+    maxTransfers: 2,
+    wheelchairAccessible: true,
+    searchWindowSeconds: 1800,
+  });
+
+  const body = JSON.parse(mock.calls[0].body);
+  assert.deepEqual(body.variables.modes, { transit: { transit: [{ mode: 'BUS' }, { mode: 'TRAM' }] } });
+  assert.deepEqual(body.variables.preferences, {
+    transit: { transfer: { maximumTransfers: 2 } },
+    accessibility: { wheelchair: { enabled: true } },
+  });
+  assert.equal(body.variables.searchWindow, 'PT1800S');
+});
+
+test('plan omits modes/preferences with no filters and defaults the 1h search window', async () => {
+  const mock = mockFetch({ json: PLAN_ENVELOPE });
+  const client = new SpiderClient('https://x', 'k', { fetch: mock.fetch });
+
+  await client.routing.plan({ origin: Location.stop('1:U1'), destination: Location.stop('1:U2') });
+
+  const body = JSON.parse(mock.calls[0].body);
+  assert.equal(body.variables.modes, undefined);
+  assert.equal(body.variables.preferences, undefined);
+  assert.equal(body.variables.searchWindow, 'PT3600S');
+});
+
+test('previousPage pages backward with last + before, not first', async () => {
+  const envelope = structuredClone(PLAN_ENVELOPE);
+  envelope.data.planConnection.pageInfo.hasPreviousPage = true;
+  const mock = mockFetch({ json: envelope });
+  const client = new SpiderClient('https://x', 'k', { fetch: mock.fetch });
+
+  const first = await client.routing.plan({ origin: Location.stop('1:U1'), destination: Location.stop('1:U2') });
+  if (!first.isSuccess) throw new Error('expected success');
+  await client.routing.previousPage(first.data, 7);
+
+  const body = JSON.parse(mock.calls[1].body);
+  assert.equal(body.variables.last, 7);
+  assert.equal(body.variables.before, 'c1');
+  assert.equal(body.variables.first, undefined);
+  assert.equal(body.variables.after, undefined);
+});

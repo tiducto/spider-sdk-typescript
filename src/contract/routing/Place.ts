@@ -1,6 +1,6 @@
-import type { PlanConnectionStop } from './PlanConnectionStop.ts';
+import type { Stop } from './Stop.ts';
 
 export interface Place {
   name?: string;
-  stop?: PlanConnectionStop;
+  stop?: Stop;
 }

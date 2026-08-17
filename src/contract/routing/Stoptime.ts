@@ -1,5 +1,5 @@
 import type { RealtimeState } from './RealtimeState.ts';
-import type { Trip } from './Trip.ts';
+import type { StopDeparturesTrip } from './StopDeparturesTrip.ts';
 
 export interface Stoptime {
   serviceDay?: number;
@@ -8,5 +8,5 @@ export interface Stoptime {
   realtime?: boolean;
   realtimeState?: RealtimeState;
   headsign?: string;
-  trip?: Trip;
+  trip?: StopDeparturesTrip;
 }
