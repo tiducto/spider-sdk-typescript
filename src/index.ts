@@ -18,6 +18,8 @@ export type {
   TripDetails,
   TripStop,
   PlanOptions,
+  PlanStreamOptions,
+  PlanStreamPageOptions,
   DeparturesOptions,
 } from './routing.ts';
 export { SpiderStops } from './stops.ts';

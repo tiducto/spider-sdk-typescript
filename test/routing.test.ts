@@ -273,3 +273,56 @@ test('planPrevious pages backward with last + before, not first', async () => {
   assert.equal(body.variables.first, undefined);
   assert.equal(body.variables.after, undefined);
 });
+
+function pageEnvelope(cursor: string, hasNextPage: boolean) {
+  const env = structuredClone(PLAN_ENVELOPE);
+  env.data.planConnection.edges[0].cursor = cursor;
+  env.data.planConnection.pageInfo = {
+    startCursor: cursor, endCursor: cursor, hasNextPage, hasPreviousPage: false, searchWindowUsed: 'PT1H',
+  };
+  return env;
+}
+
+test('planUntil streams pages forward until OTP reports no next page', async () => {
+  let n = 0;
+  const mock = mockFetch(() => ({ json: pageEnvelope(n === 0 ? 'p1' : 'p2', n++ === 0) }));
+  const client = new SpiderClient('https://x', 'k', { fetch: mock.fetch });
+
+  const pages = [];
+  for await (const res of client.routing.planUntil({ origin: Location.stop('1:U1'), destination: Location.stop('1:U2') })) {
+    assert.ok(res.isSuccess);
+    pages.push(res.data);
+  }
+  assert.equal(pages.length, 2);
+  assert.equal(mock.calls.length, 2);
+  // the second page walked forward with after = the first page's endCursor
+  assert.equal(JSON.parse(mock.calls[1].body).variables.after, 'p1');
+});
+
+test('planUntil is lazy — breaking after the first page runs a single fetch', async () => {
+  const mock = mockFetch(() => ({ json: pageEnvelope('p', true) })); // hasNextPage forever
+  const client = new SpiderClient('https://x', 'k', { fetch: mock.fetch });
+
+  for await (const res of client.routing.planUntil({ origin: Location.stop('1:U1'), destination: Location.stop('1:U2') })) {
+    assert.ok(res.isSuccess);
+    break;
+  }
+  assert.equal(mock.calls.length, 1);
+});
+
+test('planUntil stops at the maxSearchWindow budget even when OTP always reports a next page', async () => {
+  const mock = mockFetch(() => ({ json: pageEnvelope('p', true) })); // OTP never terminates the walk
+  const client = new SpiderClient('https://x', 'k', { fetch: mock.fetch });
+
+  const pages = [];
+  for await (const res of client.routing.planUntil({
+    origin: Location.stop('1:U1'),
+    destination: Location.stop('1:U2'),
+    searchWindowMinutes: 60,
+    maxSearchWindowMinutes: 180,
+  })) {
+    if (res.isSuccess) pages.push(res.data);
+  }
+  assert.equal(pages.length, 3); // budget = 180 / 60 = 3 pages
+  assert.equal(mock.calls.length, 3);
+});

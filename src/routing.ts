@@ -145,6 +145,20 @@ export interface PlanOptions {
   readonly wheelchairAccessible?: boolean;
 }
 
+/** Options for the streaming `planUntil` — the plan filters plus the stream's paging bounds. */
+export interface PlanStreamOptions extends Omit<PlanOptions, 'first'> {
+  /** Stop paging once this much time has been searched (default 240 = 4h). Bounds a sparse route. */
+  readonly maxSearchWindowMinutes?: number;
+  /** Itineraries requested per page (default 5). */
+  readonly pageSize?: number;
+}
+
+/** Paging bounds for the streaming continuations `planNextUntil` / `planPreviousUntil`. */
+export interface PlanStreamPageOptions {
+  readonly maxSearchWindowMinutes?: number;
+  readonly pageSize?: number;
+}
+
 export interface DeparturesOptions {
   readonly startTime?: number | Date;
   readonly timeRangeSeconds?: number;
@@ -152,6 +166,7 @@ export interface DeparturesOptions {
 
 const DEFAULT_FIRST = 5;
 const DEFAULT_SEARCH_WINDOW_MINUTES = 60;
+const DEFAULT_MAX_WINDOW_MINUTES = 240;
 const DEFAULT_TIME_RANGE_SECONDS = 24 * 60 * 60;
 const INT_MAX = 2_147_483_647;
 
@@ -215,6 +230,56 @@ export class SpiderRouting {
     if (!route.pageInfo.hasPreviousPage) return null;
     // Backward paging = last + before (Relay-correct), not first + before.
     return this.page(requestOf(route), undefined, last, route.pageInfo.startCursor ?? undefined, undefined);
+  }
+
+  /**
+   * Streams itineraries page by page, extending the search forward until `maxSearchWindowMinutes` of time
+   * has been searched or OTP runs out of pages. Lazy: `for await ... break` stops paging and never runs the
+   * extra OTP searches. Each yield is one page's `SpiderResult` (a terminal error ends the stream), matching
+   * the non-throwing poll helpers. For a plain big batch, prefer one `plan` with a wider `searchWindowMinutes`.
+   */
+  async *planUntil(options: PlanStreamOptions): AsyncGenerator<SpiderResult<Route>> {
+    const { maxSearchWindowMinutes, pageSize, ...planOptions } = options;
+    const size = pageSize ?? DEFAULT_FIRST;
+    const budget = pageBudget(
+      maxSearchWindowMinutes ?? DEFAULT_MAX_WINDOW_MINUTES,
+      options.searchWindowMinutes ?? DEFAULT_SEARCH_WINDOW_MINUTES,
+    );
+    const first = await this.plan({ ...planOptions, first: size });
+    yield first;
+    if (!first.isSuccess) return;
+    yield* this.pageFrom(first.data, 'forward', budget - 1, size);
+  }
+
+  /** Streaming form of `planNext`: later departures continuing after `prev`, page by page. */
+  async *planNextUntil(prev: Route, options?: PlanStreamPageOptions): AsyncGenerator<SpiderResult<Route>> {
+    const budget = pageBudget(options?.maxSearchWindowMinutes ?? DEFAULT_MAX_WINDOW_MINUTES, requestOf(prev).searchWindowMinutes);
+    yield* this.pageFrom(prev, 'forward', budget, options?.pageSize ?? DEFAULT_FIRST);
+  }
+
+  /** Streaming form of `planPrevious`: earlier departures before `prev`, page by page. */
+  async *planPreviousUntil(prev: Route, options?: PlanStreamPageOptions): AsyncGenerator<SpiderResult<Route>> {
+    const budget = pageBudget(options?.maxSearchWindowMinutes ?? DEFAULT_MAX_WINDOW_MINUTES, requestOf(prev).searchWindowMinutes);
+    yield* this.pageFrom(prev, 'backward', budget, options?.pageSize ?? DEFAULT_FIRST);
+  }
+
+  // Yield successive pages from `start` in one direction. A null page (nothing more) or an error ends it.
+  private async *pageFrom(
+    start: Route,
+    direction: 'forward' | 'backward',
+    extraPages: number,
+    pageSize: number,
+  ): AsyncGenerator<SpiderResult<Route>> {
+    let prev = start;
+    for (let i = 0; i < Math.max(0, extraPages); i++) {
+      const res = direction === 'forward'
+        ? await this.planNext(prev, pageSize)
+        : await this.planPrevious(prev, pageSize);
+      if (res === null) return;
+      yield res;
+      if (!res.isSuccess) return;
+      prev = res.data;
+    }
   }
 
   async departures(
@@ -331,6 +396,11 @@ function toEpochMs(value: number | Date): number {
 
 function clampSeconds(seconds: number): number {
   return Math.max(0, Math.min(Math.floor(seconds), INT_MAX));
+}
+
+// The fixed per-page window makes the max-window bound a deterministic page count — no searchWindowUsed math.
+function pageBudget(maxWindowMinutes: number, perPageMinutes: number): number {
+  return Math.max(1, Math.floor(maxWindowMinutes / Math.max(1, perPageMinutes)));
 }
 
 function locationToInput(location: Location): PlanLabeledLocationInput {
