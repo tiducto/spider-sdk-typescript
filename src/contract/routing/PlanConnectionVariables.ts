@@ -13,7 +13,6 @@ export interface PlanConnectionVariables {
   preferences?: PlanPreferencesInput;
   searchWindow?: string;
   first?: number;
-  last?: number;
   before?: string;
   after?: string;
 }

@@ -1,8 +1,6 @@
 import type { BikesAllowed } from './BikesAllowed.ts';
-import type { Route } from './Route.ts';
 
-export interface Trip {
+export interface PlanConnectionTrip {
   gtfsId: string;
   bikesAllowed?: BikesAllowed;
-  route: Route;
 }
