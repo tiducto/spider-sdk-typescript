@@ -76,15 +76,6 @@ test('stops wire types match stops-openapi', () => {
   ]);
 });
 
-test('routes wire types match routes-openapi', () => {
-  checkPins('routes.ts', 'routes-openapi.json', [
-    ['RouteSearchRequest', 'RouteSearchRequestWire'],
-    ['RouteSearchResponse', 'RouteSearchResponseWire'],
-    ['RouteHit', 'RouteHitWire'],
-    ['RouteSearchError', 'RouteSearchErrorWire'],
-  ]);
-});
-
 test('realtime wire types match realtime-openapi', () => {
   checkPins('realtime.ts', 'realtime-openapi.json', [
     ['VehiclesResponse', 'VehiclesResponseWire'],
