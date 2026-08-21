@@ -1,9 +1,9 @@
 {
   "openapi": "3.1.0",
   "info": {
-    "title": "Tiducto Transit API — Stops",
+    "title": "Tiducto Transit API — Routes",
     "version": "5.0",
-    "description": "Stop text/geo search — a plain-REST customer surface (key-auth). Companion to routing and realtime; the three share one pack version. Enum-ish fields are bare strings so unrecognized values pass through unchanged."
+    "description": "Route (line) text search — a plain-REST customer surface (key-auth). Companion to routing, stops, and realtime; the pack shares one version. Enum-ish fields are bare strings so unrecognized values pass through unchanged."
   },
   "servers": [
     {
@@ -22,20 +22,20 @@
     }
   ],
   "paths": {
-    "/stops/search": {
+    "/routes/search": {
       "post": {
-        "summary": "Stop text/geo search.",
-        "operationId": "stops_search",
-        "x-surface": "stops",
+        "summary": "Route (line) text search.",
+        "operationId": "routes_search",
+        "x-surface": "routes",
         "requestBody": {
           "required": true,
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/StopSearchRequest"
+                "$ref": "#/components/schemas/RouteSearchRequest"
               },
               "example": {
-                "q": "central",
+                "q": "4",
                 "filter": ""
               }
             }
@@ -47,7 +47,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/StopSearchResponse"
+                  "$ref": "#/components/schemas/RouteSearchResponse"
                 }
               }
             }
@@ -63,11 +63,11 @@
             }
           },
           "4XX": {
-            "description": "Stop-search error (e.g. filtering a non-filterable attribute).",
+            "description": "Route-search error (e.g. filtering a non-filterable attribute).",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/StopSearchError"
+                  "$ref": "#/components/schemas/RouteSearchError"
                 }
               }
             }
@@ -116,20 +116,20 @@
       }
     },
     "schemas": {
-      "StopSearchRequest": {
+      "RouteSearchRequest": {
         "type": "object",
-        "description": "POST body for /stops/search — transparently proxied to Meilisearch, so this IS a Meilisearch search body. `filter` and `sort` are Meilisearch expressions the client composes (not modeled shapes); the index is filterable on `gtfsId` and the admin-level fields, and filterable + sortable on `_geo`.",
+        "description": "POST body for /routes/search — transparently proxied to Meilisearch, so this IS a Meilisearch search body. `filter` and `sort` are Meilisearch expressions the client composes (not modeled shapes); the index is filterable on `routeId`, `mode`, and `agencyName`, and sortable on `tripCount` (default-ranked busier-first).",
         "properties": {
           "q": {
             "type": "string"
           },
           "filter": {
             "type": "string",
-            "description": "Meilisearch filter expression. Supports admin-level equality (e.g. `city = \"Brno\"`), by-id lookup (`gtfsId = \"1:39822\"`), radius (`_geoRadius(lat, lng, meters)`), and bounding box (`_geoBoundingBox([maxLat, maxLng], [minLat, minLng])`). Combine multiple with ` AND `."
+            "description": "Meilisearch filter expression. Supports mode equality (e.g. `mode = \"BUS\"`), agency equality (`agencyName = \"DPMB\"`), and by-id lookup (`routeId = \"1:L4\"`). Combine multiple with ` AND `."
           },
           "sort": {
             "type": "array",
-            "description": "Meilisearch sort expressions, e.g. [\"_geoPoint(lat, lng):asc\"] to order by distance (nearest-stop). Requires _geo (present).",
+            "description": "Meilisearch sort expressions, e.g. [\"tripCount:desc\"]. Results are already default-ranked busier-first.",
             "items": {
               "type": "string"
             }
@@ -143,13 +143,13 @@
           "q"
         ]
       },
-      "StopSearchResponse": {
+      "RouteSearchResponse": {
         "type": "object",
         "properties": {
           "hits": {
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/StopHit"
+              "$ref": "#/components/schemas/RouteHit"
             }
           },
           "query": {
@@ -161,44 +161,40 @@
           "query"
         ]
       },
-      "StopHit": {
+      "RouteHit": {
         "type": "object",
-        "description": "One indexed stop document. Field names must match the stops_env_{envId} index builder (seed-stops.sh). Admin levels and coordinates are populated only where the deployment enriched them.",
+        "description": "One indexed route document. Field names must match the routes_env_{envId} index builder. shortName/longName/agencyName are populated only where the deployment supplied them.",
         "properties": {
-          "gtfsId": {
+          "routeId": {
             "type": "string"
           },
-          "name": {
+          "shortName": {
             "type": "string"
           },
-          "lat": {
-            "type": "number"
-          },
-          "lon": {
-            "type": "number"
-          },
-          "country": {
+          "longName": {
             "type": "string"
           },
-          "region": {
+          "mode": {
             "type": "string"
           },
-          "district": {
+          "routeType": {
+            "type": "integer"
+          },
+          "agencyName": {
             "type": "string"
           },
-          "city": {
-            "type": "string"
-          },
-          "suburb": {
-            "type": "string"
+          "tripCount": {
+            "type": "integer"
           }
         },
         "required": [
-          "gtfsId",
-          "name"
+          "routeId",
+          "mode",
+          "routeType",
+          "tripCount"
         ]
       },
-      "StopSearchError": {
+      "RouteSearchError": {
         "type": "object",
         "properties": {
           "message": {

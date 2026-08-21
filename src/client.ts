@@ -3,6 +3,7 @@ import type { SpiderClientOptions, FeatureOptions, TransportOptions } from './ht
 import { CONTRACT_VERSION } from './contract.ts';
 import { SpiderRouting } from './routing.ts';
 import { SpiderStops } from './stops.ts';
+import { SpiderRoutes } from './routes.ts';
 import { SpiderRealtime } from './realtime.ts';
 
 function transportFor(
@@ -18,12 +19,14 @@ function transportFor(
 export class SpiderClient {
   readonly routing: SpiderRouting;
   readonly stops: SpiderStops;
+  readonly routes: SpiderRoutes;
   readonly realtime: SpiderRealtime;
 
   constructor(baseUrl: string, apiKey: string, options?: SpiderClientOptions) {
     const base: TransportOptions = { fetch: options?.fetch, timeoutMs: options?.timeoutMs };
     this.routing = new SpiderRouting(transportFor(baseUrl, apiKey, base, options?.routing));
     this.stops = new SpiderStops(transportFor(baseUrl, apiKey, base, options?.stops));
+    this.routes = new SpiderRoutes(transportFor(baseUrl, apiKey, base, options?.routes));
     this.realtime = new SpiderRealtime(transportFor(baseUrl, apiKey, base, options?.realtime));
   }
 

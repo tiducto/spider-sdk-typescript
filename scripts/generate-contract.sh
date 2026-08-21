@@ -122,19 +122,19 @@ cp "$WORK_DIR"/gen/*.ts "$ROUTING_DIR/"
 
 echo "==> Done. $(find "$ROUTING_DIR" -name '*.ts' | wc -l | tr -d ' ') model files."
 
-# The stops + realtime wire types are hand-written (src/stops.ts + src/realtime.ts), NOT generated.
-# stops-openapi.json + realtime-openapi.json are their published contracts; keep them as test pin
-# fixtures so SDK-type drift from the contract fails the build (test/contractPin.test.ts). Repo-sourced
-# only — a --spec local run leaves them.
+# The stops + routes + realtime wire types are hand-written (src/stops.ts + src/routes.ts +
+# src/realtime.ts), NOT generated. stops-openapi.json + routes-openapi.json + realtime-openapi.json
+# are their published contracts; keep them as test pin fixtures so SDK-type drift from the contract
+# fails the build (test/contractPin.test.ts). Repo-sourced only — a --spec local run leaves them.
 FIXTURE_DIR="$REPO_ROOT/test/fixtures"
 if [[ -z "$LOCAL_SPEC" ]]; then
     mkdir -p "$FIXTURE_DIR"
-    for doc in stops-openapi.json realtime-openapi.json; do
+    for doc in stops-openapi.json routes-openapi.json realtime-openapi.json; do
         echo "==> Fetching dist/$doc → test pin fixture"
         GH_TOKEN="${CONTRACT_REPO_TOKEN:-${GH_TOKEN:-}}" \
             gh api "repos/$CONTRACT_REPO/contents/dist/$doc?ref=$CONTRACT_REF" --jq '.content' \
             | base64 -d > "$FIXTURE_DIR/$doc"
     done
 else
-    echo "==> Skipping stops/realtime fixture fetch (local --spec run); pin fixtures left unchanged."
+    echo "==> Skipping stops/routes/realtime fixture fetch (local --spec run); pin fixtures left unchanged."
 fi
