@@ -23,7 +23,11 @@ export type {
   DeparturesOptions,
 } from './routing.ts';
 export { SpiderStops } from './stops.ts';
-export type { Stop, StopFilter } from './stops.ts';
+export type { Stop, StopFilter, GeoPoint, GeoBoundingBox } from './stops.ts';
+export { SpiderRoutes } from './routes.ts';
+// `Route` (the transit line) is re-exported as `TransitRoute`: the bare `Route`
+// name is already the released routing plan-result type (see ./routing.ts).
+export type { Route as TransitRoute, RouteFilter } from './routes.ts';
 export { SpiderRealtime } from './realtime.ts';
 export type {
   FeedFreshness,
