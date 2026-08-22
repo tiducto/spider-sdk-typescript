@@ -1,16 +1,18 @@
-name: publish npm
+name: Release
 
-# Publishes @tiducto/spider-sdk-typescript to the public npm registry (registry.npmjs.org)
-# using npm Trusted Publishing (OIDC) — no long-lived token. npm provenance is emitted from
-# the same OIDC identity (a signed, verifiable link from the tarball back to this workflow run).
+# Release pipeline: build -> publish -> refresh-context, chained so each stage gates the next.
+# A semver tag X.Y.Z IS the release (also manual dispatch).
 #
-# The published version is package.json's `version` — npm rejects republishing an existing
-# version, so bump it (via version.properties) before cutting a release. Two triggers:
-#   - push a semver tag `X.Y.Z`   → the normal release path
-#   - workflow_dispatch           → manual re-run from the Actions tab
+#   build            reuses build.yml (typecheck + typecheck:examples + test + build) — a tag on a
+#                    broken commit never reaches npm.
+#   publish          needs build. Publishes @tiducto/spider-sdk-typescript to registry.npmjs.org via
+#                    npm Trusted Publishing (OIDC, id-token: write) with provenance — no NPM_TOKEN.
+#                    Version is package.json's `version` (bump before releasing; npm rejects
+#                    republishing an existing version). Requires npm >= 11.5.1.
+#   refresh-context  needs publish. Re-indexes Context7 only after the package is live.
 #
-# Auth: OIDC trusted publishing — configure the trusted publisher once on npmjs (see
-# RELEASING.md). No NPM_TOKEN secret. Requires npm >= 11.5.1 (installed below).
+# Auth: configure the trusted publisher once on npmjs (see RELEASING.md). This workflow's FILENAME
+# (publish-npm.yml) is part of that trusted-publisher config — do NOT rename it.
 on:
   push:
     tags:
@@ -19,11 +21,21 @@ on:
 
 permissions:
   contents: read
-  id-token: write # OIDC token for trusted publishing + provenance
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
+  build:
+    uses: ./.github/workflows/build.yml
+
   publish:
+    needs: build
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write # OIDC token for trusted publishing + provenance
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-node@v5
@@ -33,9 +45,13 @@ jobs:
           scope: '@tiducto'
       # Trusted publishing needs npm >= 11.5.1; pin latest so it works regardless of the bundled version.
       - run: npm install -g npm@latest
-      # `npm run build` runs `prebuild` (rm -rf dist) first, so stale artifacts (e.g. a
-      # dropped routes.*) can never ship. `npm publish` re-runs the same clean build via
+      # `npm run build` runs `prebuild` (rm -rf dist) first; `npm publish` re-runs it via
       # `prepublishOnly`, so the tarball always reflects the current src.
       - run: npm ci
       - run: npm run build
       - run: npm publish --provenance --access public
+
+  refresh-context:
+    needs: publish
+    uses: ./.github/workflows/context7-refresh.yml
+    secrets: inherit

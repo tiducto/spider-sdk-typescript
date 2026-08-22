@@ -6,11 +6,13 @@ name: Build SDK
 #
 # CI runs only when a PR is ready — draft PRs skip it, so an unfinished PR doesn't burn a run;
 # ready_for_review re-triggers when a draft is promoted. workflow_dispatch validates main on demand.
-# Concurrency cancels superseded pushes.
+# Exposed via workflow_call so publish-npm.yml (Release) runs it before publishing. Concurrency
+# cancels superseded pushes.
 on:
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review]
   workflow_dispatch:
+  workflow_call:
 
 permissions:
   contents: read
