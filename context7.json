@@ -4,7 +4,7 @@
   "description": "A TypeScript client for trip planning, stop departures, and single-trip lookups over the Spider transit API — one typed client that ships the allowed queries and attaches auth for you, with zero runtime dependencies.",
   "branch": "main",
   "folders": ["src", "examples"],
-  "excludeFolders": ["node_modules", "dist", "test", "scripts", ".github", "src/contract"],
+  "excludeFolders": ["node_modules", "dist", "test", "scripts", ".github"],
   "excludeFiles": ["CHANGELOG.md", "examples/tsconfig.json"],
   "rules": [
     "Construct one client with `new SpiderClient(baseUrl, apiKey)`, where `baseUrl` is the per-environment host `https://your-env-slug.api.tiducto.eu` and the key is sent in an `apikey` header scoped to a single project and environment. All three surfaces — `client.routing`, `client.stops`, `client.realtime` — are ready immediately; there is no install step. Use the literal placeholders `your-env-slug` and `your-api-key` in examples.",

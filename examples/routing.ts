@@ -56,9 +56,14 @@ export async function departures(client: SpiderClient) {
   const result = await client.routing.departures('U123Z1', 5)
 
   if (result.isSuccess) {
-    for (const departure of result.data) {
-      const time = new Date(departure.scheduledTimeEpochMs).toISOString()
-      console.log(`${departure.routeShortName} → ${departure.headsign} at ${time}`)
+    for (const d of result.data) {
+      // A Departure carries the scheduled time plus, when a live feed is flowing, the realtime estimate.
+      const scheduled = new Date(d.scheduledTimeEpochMs).toISOString()
+      const live = d.isRealtime && d.realtimeTimeEpochMs !== null
+        ? `${new Date(d.realtimeTimeEpochMs).toISOString()} (${d.realtimeState ?? 'live'})`
+        : 'scheduled only'
+      const line = d.routeShortName ?? d.routeLongName ?? d.mode ?? '?'
+      console.log(`${line} → ${d.headsign ?? '?'} · sched ${scheduled} · ${live} · trip ${d.tripGtfsId ?? '?'}`)
     }
   } else {
     console.error(result.error)
@@ -174,5 +179,74 @@ export async function wheelchairPlan(client: SpiderClient) {
     }
   } else {
     console.error('Planning failed:', result.error)
+  }
+}
+
+export async function planWithOptions(client: SpiderClient) {
+  // The key optional request options on `plan`, shown together. All are optional — omit any to take the default.
+  const result = await client.routing.plan({
+    origin: Location.coordinate(49.1951, 16.6068),
+    destination: Location.coordinate(49.2246, 16.5747),
+    first: 5,                             // itineraries per page (default 5)
+    departAt: new Date(),                 // when to leave — or use `arriveBy` to pin the arrival instead
+    allowedTransitModes: ['TRAM', 'SUBWAY', 'BUS'], // restrict to these transit modes (empty/undefined = all)
+    maxTransfers: 2,                      // hard cap on transfers in any returned itinerary
+    searchWindowMinutes: 90,              // widen the window for sparse/intercity routes (default 60)
+    wheelchairAccessible: true,           // prefer step-free routing
+  })
+
+  if (result.isSuccess) {
+    for (const edge of result.data.edges) {
+      const it = edge.itinerary
+      console.log(`${it.start} → ${it.end}  ·  ${it.numberOfTransfers} transfers  ·  ${it.durationSeconds}s`)
+    }
+  } else {
+    console.error('Planning failed:', result.error.code, result.error.message)
+  }
+}
+
+export async function planWithErrorHandling(client: SpiderClient) {
+  const result = await client.routing.plan({
+    origin: Location.coordinate(49.1951, 16.6068),
+    destination: Location.coordinate(49.2246, 16.5747),
+    first: 3,
+  })
+
+  if (result.isSuccess) {
+    console.log(`${result.data.edges.length} itineraries`)
+    return
+  }
+
+  // No exceptions on failure — branch on `result.error.code`, a `SpiderErrorCode` (one of these eight literals).
+  // The `never` in the default makes this switch exhaustive: if a new code is added, this stops compiling.
+  switch (result.error.code) {
+    case 'unauthorized':
+      console.error('Bad or missing apikey — it is scoped to one project + environment')
+      break
+    case 'rate_limited':
+      console.error('Too many requests — back off and retry later')
+      break
+    case 'timeout':
+      console.error('The routing engine took too long — try a narrower search')
+      break
+    case 'not_found':
+      console.error('No such stop/trip, or no plan for these inputs')
+      break
+    case 'network':
+      console.error('Could not reach the gateway:', result.error.message)
+      break
+    case 'server':
+      console.error(`Gateway error (HTTP ${result.error.httpStatus ?? '5xx'})`)
+      break
+    case 'decoding':
+      console.error('The response did not match the expected shape:', result.error.message)
+      break
+    case 'unknown':
+      console.error('Unexpected error:', result.error.message)
+      break
+    default: {
+      const unhandled: never = result.error.code
+      throw new Error(`Unhandled error code: ${String(unhandled)}`)
+    }
   }
 }
