@@ -1,0 +1,17 @@
+export type TransitMode =
+  | 'AIRPLANE'
+  | 'BUS'
+  | 'CABLE_CAR'
+  | 'CARPOOL'
+  | 'COACH'
+  | 'FERRY'
+  | 'FUNICULAR'
+  | 'GONDOLA'
+  | 'MONORAIL'
+  | 'RAIL'
+  | 'SNOW_AND_ICE'
+  | 'SUBWAY'
+  | 'TAXI'
+  | 'TRAM'
+  | 'TROLLEYBUS'
+  | (string & {});
