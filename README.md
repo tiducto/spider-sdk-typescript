@@ -36,7 +36,7 @@ if (result.isSuccess) {
 }
 ```
 
-The recommended query pins a time and a window — a departure time (`departAt`) or an arrival deadline (`arriveBy`) together with `searchWindowMinutes` — rather than asking for _N_ results from "now". Widen the window for sparse or intercity routes, and page with `first` + `planNext`.
+The recommended query pins a time and a window — a departure time (`departAt`) or an arrival deadline (`arriveBy`) together with `searchWindowMinutes` — rather than asking for _N_ results from "now". Widen the window for sparse or intercity routes, and page through adjacent windows with `planNext` / `planPrevious`.
 
 Every call returns a `SpiderResult<T>` you branch on before reading `data`; only a contract-version mismatch throws (`SpiderContractMismatchError`). The API key is sent in an `apikey` header and is scoped to a single project + environment — the env's routing slug is the subdomain of the base URL.
 

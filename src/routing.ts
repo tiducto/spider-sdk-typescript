@@ -128,7 +128,6 @@ export interface TripDetails {
 export interface PlanOptions {
   readonly origin: Location;
   readonly destination: Location;
-  readonly first?: number;
   readonly departAt?: number | Date;
   readonly arriveBy?: number | Date;
   readonly via?: readonly ViaLocation[];
@@ -146,7 +145,7 @@ export interface PlanOptions {
 }
 
 /** Options for the streaming `planUntil` — the plan filters plus the walk's bounds. `searchWindowMinutes` is the step. */
-export interface PlanStreamOptions extends Omit<PlanOptions, 'first'> {
+export interface PlanStreamOptions extends PlanOptions {
   /** Stop once ~this many itineraries have been collected (soft — the window that reaches it is yielded whole). */
   readonly targetResults?: number;
   /** Stop after stepping through this much total time (default 360 = 6h). `searchWindowMinutes` is the step size. */
@@ -164,13 +163,9 @@ export interface DeparturesOptions {
   readonly timeRangeSeconds?: number;
 }
 
-const DEFAULT_FIRST = 5;
 const DEFAULT_SEARCH_WINDOW_MINUTES = 60;
 const DEFAULT_MAX_TRAVERSAL_MINUTES = 360;
 const DEFAULT_TARGET_RESULTS = 10;
-// High per-step cap so each step pulls a whole window (OTP's cursor then advances a full window). `first` is
-// a per-search cap, not cursor-locked, so it can be high without changing the step size.
-const MAX_RESULTS_PER_STEP = 50;
 const DEFAULT_TIME_RANGE_SECONDS = 24 * 60 * 60;
 const INT_MAX = 2_147_483_647;
 
@@ -221,19 +216,19 @@ export class SpiderRouting {
       searchWindowMinutes: options.searchWindowMinutes ?? DEFAULT_SEARCH_WINDOW_MINUTES,
       wheelchairAccessible: options.wheelchairAccessible ?? false,
     };
-    return this.page(request, options.first ?? DEFAULT_FIRST);
+    return this.page(request);
   }
 
-  async planNext(route: Route, first: number = DEFAULT_FIRST): Promise<SpiderResult<Route> | null> {
+  async planNext(route: Route): Promise<SpiderResult<Route> | null> {
     if (!route.pageInfo.hasNextPage) return null;
-    // Forward paging = first + after.
-    return this.page(requestOf(route), first, undefined, undefined, route.pageInfo.endCursor ?? undefined);
+    // Forward paging = after (no count; the server returns a whole window per page).
+    return this.page(requestOf(route), undefined, route.pageInfo.endCursor ?? undefined);
   }
 
-  async planPrevious(route: Route, last: number = DEFAULT_FIRST): Promise<SpiderResult<Route> | null> {
+  async planPrevious(route: Route): Promise<SpiderResult<Route> | null> {
     if (!route.pageInfo.hasPreviousPage) return null;
-    // Backward paging = last + before (Relay-correct), not first + before.
-    return this.page(requestOf(route), undefined, last, route.pageInfo.startCursor ?? undefined, undefined);
+    // Backward paging = before (no count; the server returns a whole window per page).
+    return this.page(requestOf(route), route.pageInfo.startCursor ?? undefined, undefined);
   }
 
   /**
@@ -255,7 +250,7 @@ export class SpiderRouting {
       maxTraversalMinutes ?? DEFAULT_MAX_TRAVERSAL_MINUTES,
       options.searchWindowMinutes ?? DEFAULT_SEARCH_WINDOW_MINUTES,
     );
-    const first = await this.plan({ ...planOptions, first: MAX_RESULTS_PER_STEP });
+    const first = await this.plan(planOptions);
     yield first;
     if (!first.isSuccess) return;
     yield* this.stepFrom(first.data, 'forward', steps - 1, target, first.data.edges.length);
@@ -287,8 +282,8 @@ export class SpiderRouting {
     let collected = collectedSoFar;
     for (let i = 0; i < Math.max(0, remainingSteps); i++) {
       const res = direction === 'forward'
-        ? await this.planNext(prev, MAX_RESULTS_PER_STEP)
-        : await this.planPrevious(prev, MAX_RESULTS_PER_STEP);
+        ? await this.planNext(prev)
+        : await this.planPrevious(prev);
       if (res === null) return;
       yield res;
       if (!res.isSuccess) return;
@@ -339,13 +334,11 @@ export class SpiderRouting {
 
   private async page(
     request: PlanRequest,
-    first?: number,
-    last?: number,
     before?: string,
     after?: string,
   ): Promise<SpiderResult<Route>> {
     try {
-      return success(await this.fetchPlan(request, first, last, before, after));
+      return success(await this.fetchPlan(request, before, after));
     } catch (e) {
       if (e instanceof SpiderContractMismatchError) throw e;
       return failure(toSpiderError(e));
@@ -354,8 +347,6 @@ export class SpiderRouting {
 
   private async fetchPlan(
     request: PlanRequest,
-    first?: number,
-    last?: number,
     before?: string,
     after?: string,
   ): Promise<Route> {
@@ -372,8 +363,6 @@ export class SpiderRouting {
       preferences: preferencesInput(request),
       // Floor to a whole minute, min 1 — a sub-minute window returns almost nothing on OTP.
       searchWindow: `PT${Math.max(1, Math.floor(request.searchWindowMinutes))}M`,
-      first,
-      last,
       before,
       after,
     };

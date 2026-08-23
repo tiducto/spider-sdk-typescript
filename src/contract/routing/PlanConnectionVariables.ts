@@ -12,8 +12,6 @@ export interface PlanConnectionVariables {
   modes?: PlanModesInput;
   preferences?: PlanPreferencesInput;
   searchWindow?: string;
-  first?: number;
-  last?: number;
   before?: string;
   after?: string;
 }
