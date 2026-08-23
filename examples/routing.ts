@@ -1,10 +1,12 @@
 import { SpiderClient, Location, ViaLocation } from '@tiducto/spider-sdk-typescript'
 
 export async function planTrip(client: SpiderClient) {
+  // The recommended shape: a departure time plus a search window, not "N results from now".
   const result = await client.routing.plan({
     origin: Location.coordinate(49.1951, 16.6068),
     destination: Location.coordinate(49.2246, 16.5747),
-    first: 3,
+    departAt: new Date(),
+    searchWindowMinutes: 60,
   })
 
   if (result.isSuccess) {
@@ -25,6 +27,7 @@ export async function planForTime(client: SpiderClient) {
     origin: Location.coordinate(49.1951, 16.6068),
     destination: Location.coordinate(49.2246, 16.5747),
     departAt: new Date('2026-07-20T08:00:00Z'),
+    searchWindowMinutes: 30,
   })
 }
 
@@ -107,7 +110,7 @@ export async function arriveBy(client: SpiderClient) {
     origin: Location.coordinate(49.1951, 16.6068),
     destination: Location.coordinate(49.2246, 16.5747),
     arriveBy: new Date('2026-07-20T09:00:00Z'),
-    first: 3,
+    searchWindowMinutes: 60,
   })
 
   if (result.isSuccess) {
@@ -209,7 +212,8 @@ export async function planWithErrorHandling(client: SpiderClient) {
   const result = await client.routing.plan({
     origin: Location.coordinate(49.1951, 16.6068),
     destination: Location.coordinate(49.2246, 16.5747),
-    first: 3,
+    departAt: new Date(),
+    searchWindowMinutes: 60,
   })
 
   if (result.isSuccess) {
