@@ -215,11 +215,15 @@ export async function planWithErrorHandling(client: SpiderClient) {
     return
   }
 
-  // No exceptions on failure — branch on `result.error.code`, a `SpiderErrorCode` (one of these eight literals).
+  // No exceptions on failure — branch on `result.error.code`, a `SpiderErrorCode` (one of these nine literals).
   // The `never` in the default makes this switch exhaustive: if a new code is added, this stops compiling.
   switch (result.error.code) {
     case 'unauthorized':
       console.error('Bad or missing apikey — it is scoped to one project + environment')
+      break
+    case 'bad_request':
+      // A server validation failure: over-cap searchWindow, bad via, or a missing required field.
+      console.error(`Invalid request on ${result.error.field ?? 'input'}: ${result.error.message}`)
       break
     case 'rate_limited':
       console.error('Too many requests — back off and retry later')

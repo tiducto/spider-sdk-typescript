@@ -211,6 +211,28 @@ test('upstream GraphQL errors become a failure result', async () => {
   if (!result.isSuccess) assert.equal(result.error.code, 'server');
 });
 
+test('a top-level BAD_REQUEST error becomes a bad_request failure with field + message', async () => {
+  const mock = mockFetch({
+    json: {
+      data: null,
+      errors: [
+        { message: 'searchWindow exceeds the maximum of PT2H', extensions: { code: 'BAD_REQUEST', field: 'searchWindow' } },
+      ],
+    },
+  });
+  const client = new SpiderClient('https://x', 'k', { fetch: mock.fetch });
+  const result = await client.routing.plan({
+    origin: Location.coordinate(1, 2),
+    destination: Location.coordinate(3, 4),
+  });
+  assert.equal(result.isSuccess, false);
+  if (!result.isSuccess) {
+    assert.equal(result.error.code, 'bad_request');
+    assert.equal(result.error.field, 'searchWindow');
+    assert.equal(result.error.message, 'searchWindow exceeds the maximum of PT2H');
+  }
+});
+
 test('a contract-version mismatch throws instead of returning a result', async () => {
   // A different MAJOR than the SDK's contract — always a genuine mismatch, whatever the current version.
   const otherMajor = `${Number(CONTRACT_VERSION.split('.')[0]) + 1}.0.0`;
