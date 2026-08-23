@@ -11,7 +11,7 @@ export interface PlanConnectionVariables {
   via?: PlanViaLocationInput[];
   modes?: PlanModesInput;
   preferences?: PlanPreferencesInput;
-  searchWindow?: string;
+  searchWindow: string;
   before?: string;
   after?: string;
 }
