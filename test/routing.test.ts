@@ -52,7 +52,6 @@ test('plan posts the persisted query and maps the route', async () => {
   const result = await client.routing.plan({
     origin: Location.coordinate(49.19, 16.61),
     destination: Location.coordinate(49.23, 16.53),
-    first: 3,
   });
 
   assert.equal(mock.calls.length, 1);
@@ -65,7 +64,8 @@ test('plan posts the persisted query and maps the route', async () => {
 
   const body = JSON.parse(call.body);
   assert.equal(body.id, PLAN.id);
-  assert.equal(body.variables.first, 3);
+  assert.equal(body.variables.first, undefined);
+  assert.equal(body.variables.last, undefined);
   assert.deepEqual(body.variables.origin, { location: { coordinate: { latitude: 49.19, longitude: 16.61 } } });
   assert.ok(typeof body.variables.dateTime.earliestDeparture === 'string');
 
@@ -211,6 +211,28 @@ test('upstream GraphQL errors become a failure result', async () => {
   if (!result.isSuccess) assert.equal(result.error.code, 'server');
 });
 
+test('a top-level BAD_REQUEST error becomes a bad_request failure with field + message', async () => {
+  const mock = mockFetch({
+    json: {
+      data: null,
+      errors: [
+        { message: 'searchWindow exceeds the maximum of PT2H', extensions: { code: 'BAD_REQUEST', field: 'searchWindow' } },
+      ],
+    },
+  });
+  const client = new SpiderClient('https://x', 'k', { fetch: mock.fetch });
+  const result = await client.routing.plan({
+    origin: Location.coordinate(1, 2),
+    destination: Location.coordinate(3, 4),
+  });
+  assert.equal(result.isSuccess, false);
+  if (!result.isSuccess) {
+    assert.equal(result.error.code, 'bad_request');
+    assert.equal(result.error.field, 'searchWindow');
+    assert.equal(result.error.message, 'searchWindow exceeds the maximum of PT2H');
+  }
+});
+
 test('a contract-version mismatch throws instead of returning a result', async () => {
   // A different MAJOR than the SDK's contract — always a genuine mismatch, whatever the current version.
   const otherMajor = `${Number(CONTRACT_VERSION.split('.')[0]) + 1}.0.0`;
@@ -257,7 +279,7 @@ test('plan omits modes/preferences with no filters and defaults the 1h search wi
   assert.equal(body.variables.searchWindow, 'PT60M');
 });
 
-test('planPrevious pages backward with last + before, not first', async () => {
+test('planPrevious pages backward with before and no count', async () => {
   const envelope = structuredClone(PLAN_ENVELOPE);
   envelope.data.planConnection.pageInfo.hasPreviousPage = true;
   const mock = mockFetch({ json: envelope });
@@ -265,12 +287,12 @@ test('planPrevious pages backward with last + before, not first', async () => {
 
   const first = await client.routing.plan({ origin: Location.stop('1:U1'), destination: Location.stop('1:U2') });
   if (!first.isSuccess) throw new Error('expected success');
-  await client.routing.planPrevious(first.data, 7);
+  await client.routing.planPrevious(first.data);
 
   const body = JSON.parse(mock.calls[1].body);
-  assert.equal(body.variables.last, 7);
   assert.equal(body.variables.before, 'c1');
   assert.equal(body.variables.first, undefined);
+  assert.equal(body.variables.last, undefined);
   assert.equal(body.variables.after, undefined);
 });
 
@@ -295,8 +317,9 @@ test('planUntil steps forward until it reaches targetResults', async () => {
   }
   assert.equal(steps.length, 2); // 1 itinerary/step, target 2 → 2 steps
   assert.equal(mock.calls.length, 2);
-  // each step pulls a whole window (a high first), not a small page
-  assert.equal(JSON.parse(mock.calls[0].body).variables.first, 50);
+  // no page-size count is sent — the server returns a whole window per page
+  assert.equal(JSON.parse(mock.calls[0].body).variables.first, undefined);
+  assert.equal(JSON.parse(mock.calls[0].body).variables.last, undefined);
   // and it walks forward with after = the previous step's endCursor
   assert.equal(JSON.parse(mock.calls[1].body).variables.after, 'p');
 });

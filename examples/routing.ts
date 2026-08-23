@@ -1,10 +1,12 @@
 import { SpiderClient, Location, ViaLocation } from '@tiducto/spider-sdk-typescript'
 
 export async function planTrip(client: SpiderClient) {
+  // The recommended shape: a departure time plus a search window, not "N results from now".
   const result = await client.routing.plan({
     origin: Location.coordinate(49.1951, 16.6068),
     destination: Location.coordinate(49.2246, 16.5747),
-    first: 3,
+    departAt: new Date(),
+    searchWindowMinutes: 60,
   })
 
   if (result.isSuccess) {
@@ -25,6 +27,7 @@ export async function planForTime(client: SpiderClient) {
     origin: Location.coordinate(49.1951, 16.6068),
     destination: Location.coordinate(49.2246, 16.5747),
     departAt: new Date('2026-07-20T08:00:00Z'),
+    searchWindowMinutes: 30,
   })
 }
 
@@ -32,7 +35,6 @@ export async function laterItineraries(client: SpiderClient) {
   const firstPage = await client.routing.plan({
     origin: Location.coordinate(49.1951, 16.6068),
     destination: Location.coordinate(49.2246, 16.5747),
-    first: 3,
   })
 
   if (!firstPage.isSuccess) {
@@ -40,9 +42,9 @@ export async function laterItineraries(client: SpiderClient) {
     return
   }
 
-  const later = await client.routing.planNext(firstPage.data, 3)
+  const later = await client.routing.planNext(firstPage.data)
   if (later === null) {
-    console.log('No later itineraries — that was the last page')
+    console.log('No later itineraries — that was the last window')
   } else if (later.isSuccess) {
     for (const edge of later.data.edges) {
       console.log(`${edge.itinerary.start} → ${edge.itinerary.end}`)
@@ -88,7 +90,6 @@ export async function planWithModes(client: SpiderClient) {
     origin: Location.coordinate(49.1951, 16.6068),
     destination: Location.coordinate(49.2246, 16.5747),
     allowedTransitModes: ['TRAM', 'SUBWAY'],
-    first: 3,
   })
 
   if (result.isSuccess) {
@@ -107,7 +108,7 @@ export async function arriveBy(client: SpiderClient) {
     origin: Location.coordinate(49.1951, 16.6068),
     destination: Location.coordinate(49.2246, 16.5747),
     arriveBy: new Date('2026-07-20T09:00:00Z'),
-    first: 3,
+    searchWindowMinutes: 60,
   })
 
   if (result.isSuccess) {
@@ -123,7 +124,6 @@ export async function earlierItineraries(client: SpiderClient) {
   const firstPage = await client.routing.plan({
     origin: Location.coordinate(49.1951, 16.6068),
     destination: Location.coordinate(49.2246, 16.5747),
-    first: 3,
   })
 
   if (!firstPage.isSuccess) {
@@ -131,9 +131,9 @@ export async function earlierItineraries(client: SpiderClient) {
     return
   }
 
-  const earlier = await client.routing.planPrevious(firstPage.data, 3)
+  const earlier = await client.routing.planPrevious(firstPage.data)
   if (earlier === null) {
-    console.log('No earlier itineraries — that was the first page')
+    console.log('No earlier itineraries — that was the first window')
   } else if (earlier.isSuccess) {
     for (const edge of earlier.data.edges) {
       console.log(`${edge.itinerary.start} → ${edge.itinerary.end}`)
@@ -149,7 +149,6 @@ export async function planVia(client: SpiderClient) {
     origin: Location.coordinate(49.1951, 16.6068),
     destination: Location.coordinate(49.2246, 16.5747),
     via: [ViaLocation.visit(Location.stop('U123Z1'), 120)],
-    first: 3,
   })
 
   if (result.isSuccess) {
@@ -166,7 +165,6 @@ export async function wheelchairPlan(client: SpiderClient) {
     origin: Location.coordinate(49.1951, 16.6068),
     destination: Location.coordinate(49.2246, 16.5747),
     wheelchairAccessible: true,
-    first: 3,
   })
 
   if (result.isSuccess) {
@@ -187,7 +185,6 @@ export async function planWithOptions(client: SpiderClient) {
   const result = await client.routing.plan({
     origin: Location.coordinate(49.1951, 16.6068),
     destination: Location.coordinate(49.2246, 16.5747),
-    first: 5,                             // itineraries per page (default 5)
     departAt: new Date(),                 // when to leave — or use `arriveBy` to pin the arrival instead
     allowedTransitModes: ['TRAM', 'SUBWAY', 'BUS'], // restrict to these transit modes (empty/undefined = all)
     maxTransfers: 2,                      // hard cap on transfers in any returned itinerary
@@ -209,7 +206,8 @@ export async function planWithErrorHandling(client: SpiderClient) {
   const result = await client.routing.plan({
     origin: Location.coordinate(49.1951, 16.6068),
     destination: Location.coordinate(49.2246, 16.5747),
-    first: 3,
+    departAt: new Date(),
+    searchWindowMinutes: 60,
   })
 
   if (result.isSuccess) {
@@ -217,11 +215,15 @@ export async function planWithErrorHandling(client: SpiderClient) {
     return
   }
 
-  // No exceptions on failure — branch on `result.error.code`, a `SpiderErrorCode` (one of these eight literals).
+  // No exceptions on failure — branch on `result.error.code`, a `SpiderErrorCode` (one of these nine literals).
   // The `never` in the default makes this switch exhaustive: if a new code is added, this stops compiling.
   switch (result.error.code) {
     case 'unauthorized':
       console.error('Bad or missing apikey — it is scoped to one project + environment')
+      break
+    case 'bad_request':
+      // A server validation failure: over-cap searchWindow, bad via, or a missing required field.
+      console.error(`Invalid request on ${result.error.field ?? 'input'}: ${result.error.message}`)
       break
     case 'rate_limited':
       console.error('Too many requests — back off and retry later')

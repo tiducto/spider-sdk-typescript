@@ -22,7 +22,8 @@ const client = new SpiderClient('https://your-env-slug.api.tiducto.eu', process.
 const result = await client.routing.plan({
   origin: Location.coordinate(49.19, 16.61),
   destination: Location.coordinate(49.23, 16.53),
-  first: 3,
+  departAt: new Date(),     // leave now…
+  searchWindowMinutes: 60,  // …and scan the next 60 minutes
 });
 
 if (result.isSuccess) {
@@ -34,6 +35,8 @@ if (result.isSuccess) {
   console.error(result.error.code, result.error.message);
 }
 ```
+
+The recommended query pins a time and a window — a departure time (`departAt`) or an arrival deadline (`arriveBy`) together with `searchWindowMinutes` — rather than asking for _N_ results from "now". Widen the window for sparse or intercity routes, and page through adjacent windows with `planNext` / `planPrevious`.
 
 Every call returns a `SpiderResult<T>` you branch on before reading `data`; only a contract-version mismatch throws (`SpiderContractMismatchError`). The API key is sent in an `apikey` header and is scoped to a single project + environment — the env's routing slug is the subdomain of the base URL.
 

@@ -5,5 +5,6 @@ const client = new SpiderClient('https://your-env-slug.api.tiducto.eu', 'your-ap
 const result = await client.routing.plan({
   origin: Location.coordinate(49.1908, 16.6128),
   destination: Location.coordinate(49.2270, 16.5273),
-  first: 3,
+  departAt: new Date(),
+  searchWindowMinutes: 60,
 })

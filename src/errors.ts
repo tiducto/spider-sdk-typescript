@@ -2,6 +2,7 @@ export type SpiderErrorCode =
   | 'network'
   | 'timeout'
   | 'unauthorized'
+  | 'bad_request'
   | 'not_found'
   | 'server'
   | 'rate_limited'
@@ -13,6 +14,11 @@ export interface SpiderError {
   readonly message: string;
   readonly httpStatus?: number;
   readonly serverCode?: string;
+  /**
+   * For a `bad_request` (a server validation failure — over-cap `searchWindow`, malformed `via`, or a
+   * missing required field), the offending input field when the server names one. Undefined otherwise.
+   */
+  readonly field?: string;
   readonly cause?: unknown;
 }
 
@@ -28,19 +34,21 @@ export class SpiderContractMismatchError extends Error {
   }
 }
 
-export type TransportErrorKind = 'http' | 'no_data' | 'upstream';
+export type TransportErrorKind = 'http' | 'no_data' | 'upstream' | 'bad_request';
 
 export class TransportError extends Error {
   readonly kind: TransportErrorKind;
   readonly httpStatus: number | undefined;
   readonly serverCode: string | undefined;
+  readonly field: string | undefined;
 
-  constructor(kind: TransportErrorKind, message: string, httpStatus?: number, serverCode?: string) {
+  constructor(kind: TransportErrorKind, message: string, httpStatus?: number, serverCode?: string, field?: string) {
     super(message);
     this.name = 'TransportError';
     this.kind = kind;
     this.httpStatus = httpStatus;
     this.serverCode = serverCode;
+    this.field = field;
   }
 }
 
@@ -95,6 +103,7 @@ export function toSpiderError(e: unknown): SpiderError {
       return { code, message: e.message, httpStatus: status, serverCode: e.serverCode };
     }
     if (e.kind === 'no_data') return { code: 'not_found', message: e.message };
+    if (e.kind === 'bad_request') return { code: 'bad_request', message: e.message, field: e.field };
     return { code: 'server', message: e.message };
   }
   if (e instanceof DecodingError) return { code: 'decoding', message: e.message, cause: e.cause };

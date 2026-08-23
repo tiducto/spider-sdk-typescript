@@ -32,9 +32,14 @@ export interface RawResponse {
   readonly text: string;
 }
 
+interface GraphQLError {
+  message: string;
+  extensions?: { code?: string; field?: string } | null;
+}
+
 interface GraphQLEnvelope<D> {
   data?: D | null;
-  errors?: ReadonlyArray<{ message: string }> | null;
+  errors?: ReadonlyArray<GraphQLError> | null;
 }
 
 export function parseJson<T>(text: string, where: string): T {
@@ -78,6 +83,11 @@ export class Transport {
     }
     const envelope = parseJson<GraphQLEnvelope<D>>(text, `routing ${op.path}`);
     if (envelope.errors != null && envelope.errors.length > 0) {
+      // A BAD_REQUEST extension → typed bad_request; anything else stays a generic upstream (→ server).
+      const bad = envelope.errors.find((e) => e.extensions?.code === 'BAD_REQUEST');
+      if (bad != null) {
+        throw new TransportError('bad_request', bad.message, undefined, undefined, bad.extensions?.field);
+      }
       throw new TransportError('upstream', `routing ${op.path} errors: ${envelope.errors.map((e) => e.message).join(', ')}`);
     }
     if (envelope.data == null) {
