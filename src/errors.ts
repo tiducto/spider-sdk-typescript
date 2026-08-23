@@ -40,7 +40,6 @@ export class TransportError extends Error {
   readonly kind: TransportErrorKind;
   readonly httpStatus: number | undefined;
   readonly serverCode: string | undefined;
-  // Set only for kind 'bad_request': the offending input field the server named, if any.
   readonly field: string | undefined;
 
   constructor(kind: TransportErrorKind, message: string, httpStatus?: number, serverCode?: string, field?: string) {

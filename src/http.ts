@@ -34,7 +34,6 @@ export interface RawResponse {
 
 interface GraphQLError {
   message: string;
-  // Present on validation failures the gateway/router stamp; code === 'BAD_REQUEST' + the offending field.
   extensions?: { code?: string; field?: string } | null;
 }
 
@@ -84,8 +83,7 @@ export class Transport {
     }
     const envelope = parseJson<GraphQLEnvelope<D>>(text, `routing ${op.path}`);
     if (envelope.errors != null && envelope.errors.length > 0) {
-      // A BAD_REQUEST extension (over-cap searchWindow, bad via, missing required field) → typed bad_request;
-      // anything else stays a generic upstream (→ server).
+      // A BAD_REQUEST extension → typed bad_request; anything else stays a generic upstream (→ server).
       const bad = envelope.errors.find((e) => e.extensions?.code === 'BAD_REQUEST');
       if (bad != null) {
         throw new TransportError('bad_request', bad.message, undefined, undefined, bad.extensions?.field);
