@@ -1,6 +1,6 @@
 {
   "name": "@tiducto/spider-sdk-typescript",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "TypeScript SDK for the Spider transit API: trip planning, stop search, and live realtime data.",
   "author": "Tiducto Mobility s.r.o.",
   "type": "module",
