@@ -253,6 +253,7 @@ test('plan maps modes, transfers, wheelchair, and search window to OTP inputs', 
     destination: Location.coordinate(49.23, 16.53),
     // WALK is a street mode, not a transit filter — it must drop out, leaving BUS + TRAM.
     allowedTransitModes: ['BUS', 'TRAM', 'WALK'],
+    // 2 transfers ⇒ wire maximumTransfers = 3 (the router counts boardings = transfers + 1).
     maxTransfers: 2,
     wheelchairAccessible: true,
     searchWindowMinutes: 30,
@@ -261,7 +262,7 @@ test('plan maps modes, transfers, wheelchair, and search window to OTP inputs', 
   const body = JSON.parse(mock.calls[0].body);
   assert.deepEqual(body.variables.modes, { transit: { transit: [{ mode: 'BUS' }, { mode: 'TRAM' }] } });
   assert.deepEqual(body.variables.preferences, {
-    transit: { transfer: { maximumTransfers: 2 } },
+    transit: { transfer: { maximumTransfers: 3 } },
     accessibility: { wheelchair: { enabled: true } },
   });
   assert.equal(body.variables.searchWindow, 'PT30M');
