@@ -134,6 +134,28 @@ export class Transport {
     return { ok: res.ok, status: res.status, text: await res.text() };
   }
 
+  /**
+   * Best-effort connection warm-up. Issues one keyless `GET {baseUrl}/ping` through this
+   * transport's own fetch, so the TLS handshake + connection it opens joins the per-origin pool
+   * and is reused by the first real call. Returns the measured round-trip in milliseconds.
+   *
+   * Never rejects: a network error, a timeout, or a non-2xx (e.g. a 404 before the gateway
+   * `/ping` route is deployed) all still opened — or attempted to open — the connection, so the
+   * elapsed time is returned regardless. `/ping` is keyless, so no apikey/contract/sdk headers
+   * ride the request; it goes out as a bare GET.
+   */
+  async ping(): Promise<number> {
+    const start = performance.now();
+    try {
+      const res = await this.send(`${this.baseUrl}/ping`, { method: 'GET' });
+      // Drain the body so the connection is released back to the pool for the first real call.
+      await res.text();
+    } catch {
+      // Best-effort: the connection attempt itself is the warm-up — swallow every failure.
+    }
+    return performance.now() - start;
+  }
+
   private buildHeaders(extra?: Record<string, string>): Headers {
     const headers = new Headers(extra);
     headers.set('apikey', this.apiKey);

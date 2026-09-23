@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+- Add `SpiderClient.warmup()` — a best-effort, keyless `GET /ping` that pre-establishes the
+  connection to the API host so the first real call skips the cold TLS/connection setup (~0.6s on
+  mobile). It goes through the SDK's own fetch path, so the connection it opens is the one real
+  calls reuse. Safe to fire-and-forget: never throws, and resolves with the measured round-trip in
+  milliseconds.
+
 ## 0.1.0 — 2026-08-22
 
 Initial public pre-release; targets Spider API contract 0.1.
