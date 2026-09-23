@@ -18,7 +18,7 @@ test('strips a trailing slash from the base url', async () => {
   assert.ok(client.routing);
 });
 
-test('warmup pre-warms the connection with one keyless GET /ping', async () => {
+test('warmup pre-warms the connection with one keyed GET /ping', async () => {
   const mock = mockFetch({ status: 200, text: 'pong' });
   const client = new SpiderClient('https://x', 'secret-key', { fetch: mock.fetch });
   const ms = await client.warmup();
@@ -26,8 +26,8 @@ test('warmup pre-warms the connection with one keyless GET /ping', async () => {
   assert.equal(mock.calls.length, 1);
   assert.equal(mock.calls[0].method, 'GET');
   assert.equal(mock.calls[0].url, 'https://x/ping');
-  // /ping is keyless — no apikey must ride the warm-up request.
-  assert.equal(mock.calls[0].headers.get('apikey'), null);
+  // /ping authenticates with the client apikey.
+  assert.equal(mock.calls[0].headers.get('apikey'), 'secret-key');
   assert.equal(typeof ms, 'number');
   assert.ok(ms >= 0);
 });

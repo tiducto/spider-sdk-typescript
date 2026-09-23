@@ -135,19 +135,23 @@ export class Transport {
   }
 
   /**
-   * Best-effort connection warm-up. Issues one keyless `GET {baseUrl}/ping` through this
-   * transport's own fetch, so the TLS handshake + connection it opens joins the per-origin pool
-   * and is reused by the first real call. Returns the measured round-trip in milliseconds.
+   * Best-effort connection warm-up. Issues one `GET {baseUrl}/ping`, authenticated with the
+   * client apikey, through this transport's own fetch, so the TLS handshake + connection it opens
+   * joins the per-origin pool and is reused by the first real call. Returns the measured
+   * round-trip in milliseconds.
    *
-   * Never rejects: a network error, a timeout, or a non-2xx (e.g. a 404 before the gateway
-   * `/ping` route is deployed) all still opened — or attempted to open — the connection, so the
-   * elapsed time is returned regardless. `/ping` is keyless, so no apikey/contract/sdk headers
-   * ride the request; it goes out as a bare GET.
+   * Never rejects: a network error, a timeout, or a non-2xx (e.g. a 401 against a keyless gateway,
+   * or a 404 before the `/ping` route is deployed) all still opened — or attempted to open — the
+   * connection, so the elapsed time is returned regardless. Only the apikey rides the request:
+   * `/ping` is not contract-gated, so no contract/sdk headers are sent.
    */
   async ping(): Promise<number> {
     const start = performance.now();
     try {
-      const res = await this.send(`${this.baseUrl}/ping`, { method: 'GET' });
+      const res = await this.send(`${this.baseUrl}/ping`, {
+        method: 'GET',
+        headers: new Headers({ apikey: this.apiKey }),
+      });
       // Drain the body so the connection is released back to the pool for the first real call.
       await res.text();
     } catch {

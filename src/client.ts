@@ -37,15 +37,15 @@ export class SpiderClient {
 
   /**
    * Pre-warms the connection to the API host so the first real call doesn't pay for the cold
-   * TLS/connection setup. Issues one best-effort, keyless `GET /ping` through the SDK's own HTTP
-   * path; the connection it establishes joins the per-origin pool that trip planning, stop, and
-   * realtime calls reuse — so the ~0.6s cold handshake (notably on mobile) is spent up front
-   * instead of on that first request.
+   * TLS/connection setup. Issues one best-effort `GET /ping`, authenticated with the client
+   * apikey, through the SDK's own HTTP path; the connection it establishes joins the per-origin
+   * pool that trip planning, stop, and realtime calls reuse — so the ~0.6s cold handshake
+   * (notably on mobile) is spent up front instead of on that first request.
    *
    * Call it once at app start, or when the app returns to the foreground. Safe to
    * fire-and-forget: it never throws or rejects — on any failure (a network error, or a non-2xx
-   * such as a 404 while the gateway `/ping` route is not yet deployed) the connection was still
-   * warmed and it resolves with the measured round-trip in milliseconds.
+   * such as a 401/404 while the gateway `/ping` route is keyless or not yet deployed) the
+   * connection was still warmed and it resolves with the measured round-trip in milliseconds.
    */
   async warmup(): Promise<number> {
     return this.transport.ping();
