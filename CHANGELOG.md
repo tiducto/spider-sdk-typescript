@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.1.2 — 2026-09-23
 
 - Add `SpiderClient.warmup()` — a best-effort, keyless `GET /ping` that pre-establishes the
   connection to the API host so the first real call skips the cold TLS/connection setup (~0.6s on
