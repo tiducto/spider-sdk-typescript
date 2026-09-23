@@ -71,7 +71,7 @@ export class Transport {
   async graphql<D>(op: { id: string; path: string }, variables: unknown): Promise<D> {
     const res = await this.send(`${this.baseUrl}/routing/${op.path}`, {
       method: 'POST',
-      headers: this.buildHeaders({ 'content-type': 'application/json' }),
+      headers: this.contractHeaders({ 'content-type': 'application/json' }),
       body: JSON.stringify({ id: op.id, variables }),
     });
     checkContract(res.headers.get(CONTRACT_HEADER));
@@ -99,7 +99,7 @@ export class Transport {
   async postJson<D>(path: string, body: unknown, errorMessage?: (raw: string) => string): Promise<D> {
     const res = await this.send(`${this.baseUrl}${path}`, {
       method: 'POST',
-      headers: this.buildHeaders({ 'content-type': 'application/json' }),
+      headers: this.contractHeaders({ 'content-type': 'application/json' }),
       body: JSON.stringify(body),
     });
     checkContract(res.headers.get(CONTRACT_HEADER));
@@ -129,7 +129,7 @@ export class Transport {
         url.searchParams.set(key, value);
       }
     }
-    const res = await this.send(url.toString(), { method: 'GET', headers: this.buildHeaders() });
+    const res = await this.send(url.toString(), { method: 'GET', headers: this.contractHeaders() });
     checkContract(res.headers.get(CONTRACT_HEADER));
     return { ok: res.ok, status: res.status, text: await res.text() };
   }
@@ -142,16 +142,14 @@ export class Transport {
    *
    * Never rejects: a network error, a timeout, or a non-2xx (e.g. a 401 against a keyless gateway,
    * or a 404 before the `/ping` route is deployed) all still opened — or attempted to open — the
-   * connection, so the elapsed time is returned regardless. Only the apikey rides the request:
-   * `/ping` is not contract-gated, so no contract/sdk headers are sent.
+   * connection, so the elapsed time is returned regardless. Only the apikey rides the request — it
+   * comes from the transport's shared request setup in `send()`; `/ping` is not contract-gated, so
+   * no contract/sdk headers are sent.
    */
   async ping(): Promise<number> {
     const start = performance.now();
     try {
-      const res = await this.send(`${this.baseUrl}/ping`, {
-        method: 'GET',
-        headers: new Headers({ apikey: this.apiKey }),
-      });
+      const res = await this.send(`${this.baseUrl}/ping`, { method: 'GET' });
       // Drain the body so the connection is released back to the pool for the first real call.
       await res.text();
     } catch {
@@ -160,15 +158,22 @@ export class Transport {
     return performance.now() - start;
   }
 
-  private buildHeaders(extra?: Record<string, string>): Headers {
+  // Contract-gated calls carry the contract + sdk identity headers; the apikey is applied
+  // centrally in `send()`, so it's not set here.
+  private contractHeaders(extra?: Record<string, string>): Headers {
     const headers = new Headers(extra);
-    headers.set('apikey', this.apiKey);
     headers.set(CONTRACT_HEADER, CONTRACT_VERSION);
     headers.set(SDK_HEADER, SDK_IDENTITY);
     return headers;
   }
 
   private async send(url: string, init: RequestInit): Promise<Response> {
+    // The client apikey is invariant for the client's whole life, so it's applied here on the
+    // shared request path — carried by every request (real calls and the warm-up) rather than
+    // re-attached per call.
+    const headers = new Headers(init.headers);
+    headers.set('apikey', this.apiKey);
+    const request: RequestInit = { ...init, headers };
     const maxAttempts = this.retry?.maxAttempts ?? 1;
     for (let attempt = 1; ; attempt++) {
       const controller = new AbortController();
@@ -176,7 +181,7 @@ export class Transport {
       let res: Response | undefined;
       let err: unknown;
       try {
-        res = await this.doFetch(url, { ...init, signal: controller.signal });
+        res = await this.doFetch(url, { ...request, signal: controller.signal });
       } catch (e) {
         err = e;
       } finally {
