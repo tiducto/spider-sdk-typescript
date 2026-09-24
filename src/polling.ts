@@ -24,10 +24,25 @@ export function pollVehicleForTrip(
 
 export function pollDelays(
   realtime: SpiderRealtime,
+  byServiceDate: Readonly<Record<string, readonly string[]>>,
+  options?: PollOptions,
+): AsyncGenerator<SpiderResult<TripDelays>>;
+export function pollDelays(
+  realtime: SpiderRealtime,
   tripIds: readonly string[],
+  serviceDate: string,
+  options?: PollOptions,
+): AsyncGenerator<SpiderResult<TripDelays>>;
+export function pollDelays(
+  realtime: SpiderRealtime,
+  arg: Readonly<Record<string, readonly string[]>> | readonly string[],
+  serviceDateOrOptions?: string | PollOptions,
   options?: PollOptions,
 ): AsyncGenerator<SpiderResult<TripDelays>> {
-  return poll(options, () => realtime.delays(tripIds));
+  if (typeof serviceDateOrOptions === 'string') {
+    return poll(options, () => realtime.delays(arg as readonly string[], serviceDateOrOptions));
+  }
+  return poll(serviceDateOrOptions, () => realtime.delays(arg as Readonly<Record<string, readonly string[]>>));
 }
 
 export function pollAlerts(
