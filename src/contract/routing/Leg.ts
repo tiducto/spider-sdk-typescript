@@ -12,6 +12,7 @@ export interface Leg {
   end: LegTime;
   realtimeState?: RealtimeState;
   realTime?: boolean;
+  serviceDate?: string;
   from: Place;
   to: Place;
   route?: Route;
