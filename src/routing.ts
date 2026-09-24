@@ -442,8 +442,11 @@ function modesInput(modes: readonly TransitMode[]): PlanModesInput | undefined {
 }
 
 function preferencesInput(request: PlanRequest): PlanPreferencesInput | undefined {
+  // The router indexes legs with leg 0 = the initial access (walk, or nothing), so its wire
+  // `maximumTransfers` counts boardings = transfers + 1 (wire 0 = walk-only, not exposed here).
+  // `maxTransfers` is a transfer count, so map it to boardings: 0 transfers = 1 boarding (direct).
   const transit = request.maxTransfers != null
-    ? { transfer: { maximumTransfers: request.maxTransfers } }
+    ? { transfer: { maximumTransfers: request.maxTransfers + 1 } }
     : undefined;
   const accessibility = request.wheelchairAccessible ? { wheelchair: { enabled: true } } : undefined;
   if (transit === undefined && accessibility === undefined) return undefined;
