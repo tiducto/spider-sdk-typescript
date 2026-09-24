@@ -264,23 +264,51 @@ export async function streamTrip(client: SpiderClient) {
     targetResults: 5,       // soft floor: keep sweeping until at least this many are found
     maxWindowMinutes: 180,  // cap the forward sweep
   })) {
-    switch (event.kind) {
-      case 'chunk':
+    switch (event.type) {
+      case 'result':
         for (const itinerary of event.itineraries) {
           const delay = itinerary.legs[0]?.startDelaySeconds ?? 0
           console.log(`${itinerary.start} → ${itinerary.end}  ·  ${delay >= 0 ? '+' : ''}${delay}s`)
         }
         break
-      case 'page':
-        // Re-call planStream with `after: event.pageInfo.endCursor` to continue the sweep forward.
-        console.log(`more available: ${event.pageInfo.hasNextPage}`)
-        break
       case 'done':
-        console.log(`done after ${event.iterations} iterations (${event.stoppedBy}), ${event.resultCount} results`)
+        // Terminal: continue forward with planStreamNext(options, event.pageInfo.endCursor) when hasNextPage.
+        console.log(`done · more available: ${event.pageInfo.hasNextPage}`)
         break
       case 'failure':
         console.error('Stream failed:', event.error.code, event.error.message)
         break
+    }
+  }
+}
+
+export async function streamTripContinue(client: SpiderClient) {
+  // Continue a stream forward from the previous sweep's terminal `done` cursor. The same options are passed
+  // again (so targetResults / maxWindowMinutes can vary per continuation) plus the raw endCursor.
+  const options = {
+    origin: Location.coordinate(49.1951, 16.6068),
+    destination: Location.coordinate(49.2246, 16.5747),
+    departAt: new Date(),
+    targetResults: 5,
+    maxWindowMinutes: 180,
+  }
+
+  let endCursor: string | null = null
+  let hasNextPage = false
+  for await (const event of client.routing.planStream(options)) {
+    if (event.type === 'done') {
+      hasNextPage = event.pageInfo.hasNextPage
+      endCursor = event.pageInfo.endCursor
+    }
+  }
+
+  if (hasNextPage && endCursor !== null) {
+    for await (const event of client.routing.planStreamNext(options, endCursor)) {
+      if (event.type === 'result') {
+        for (const itinerary of event.itineraries) {
+          console.log(`${itinerary.start} → ${itinerary.end}`)
+        }
+      }
     }
   }
 }
