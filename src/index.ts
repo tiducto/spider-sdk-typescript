@@ -18,8 +18,6 @@ export type {
   TripDetails,
   TripStop,
   PlanOptions,
-  PlanStreamOptions,
-  PlanStreamPageOptions,
   PlanStreamRequestOptions,
   PlanStreamEvent,
   DeparturesOptions,

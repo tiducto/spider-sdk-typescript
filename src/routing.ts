@@ -104,38 +104,25 @@ export interface Route {
 
 /**
  * One event from {@link SpiderRouting.planStream}. The router sweeps the search window forward and pushes
- * itineraries as they finalize: zero or more `chunk`s, then a `page` with the continuation cursors, then a
- * terminal `done`. A `failure` is terminal and takes the place of the rest.
+ * finalized itineraries as `result`s; a terminal `done` carries the continuation {@link RoutePageInfo}. A
+ * `failure` is terminal and takes the place of the rest.
  */
 export type PlanStreamEvent =
   | {
       /** A batch of finalized itineraries as the search frontier advances (with realtime delays on their legs). */
-      readonly kind: 'chunk';
-      /** How far (seconds from the search start) the window has swept. */
-      readonly frontierSeconds: number;
-      /** Running count of itineraries discovered so far. */
-      readonly found: number;
-      /** Count of itineraries committed (finalized) so far. */
-      readonly finalized: number;
+      readonly type: 'result';
       readonly itineraries: readonly Itinerary[];
     }
   | {
-      /** Continuation cursors for the stream, mirroring {@link Route.pageInfo}. */
-      readonly kind: 'page';
+      /** Terminal: the continuation cursors, mirroring {@link Route.pageInfo}. Continue with
+       * {@link SpiderRouting.planStreamNext} (`endCursor`) or {@link SpiderRouting.planStreamPrevious}
+       * (`startCursor`), gated on `hasNextPage` / `hasPreviousPage`. */
+      readonly type: 'done';
       readonly pageInfo: RoutePageInfo;
     }
   | {
-      /** Terminal summary once the sweep stops. */
-      readonly kind: 'done';
-      readonly iterations: number;
-      readonly windowSeconds: number;
-      readonly resultCount: number;
-      /** Why the sweep stopped (e.g. `targetResults` or `maxWindow`). */
-      readonly stoppedBy: string;
-    }
-  | {
       /** Terminal failure — a transport/HTTP problem, a decoding error, or a server `error` event. */
-      readonly kind: 'failure';
+      readonly type: 'failure';
       readonly error: SpiderError;
     };
 
@@ -195,24 +182,10 @@ export interface PlanOptions {
   readonly wheelchairAccessible?: boolean;
 }
 
-/** Options for the streaming `planUntil` — the plan filters plus the walk's bounds. `searchWindowMinutes` is the step. */
-export interface PlanStreamOptions extends PlanOptions {
-  /** Stop once ~this many itineraries have been collected (soft — the window that reaches it is yielded whole). */
-  readonly targetResults?: number;
-  /** Stop after stepping through this much total time (default 360 = 6h). `searchWindowMinutes` is the step size. */
-  readonly maxTraversalMinutes?: number;
-}
-
-/** Bounds for the streaming continuations `planNextUntil` / `planPreviousUntil` (the step is fixed from `prev`). */
-export interface PlanStreamPageOptions {
-  readonly targetResults?: number;
-  readonly maxTraversalMinutes?: number;
-}
-
 /**
- * Options for {@link SpiderRouting.planStream} — the server-push SSE stream. Distinct from `planUntil`, which
- * window-walks batch calls client-side: `planStream` opens one long-lived Server-Sent Events request and the
- * router pushes itineraries (with realtime delays) as it sweeps the window forward.
+ * Options for {@link SpiderRouting.planStream} and its continuations — the server-push SSE stream that opens one
+ * long-lived Server-Sent Events request and pushes itineraries (with realtime delays) as the router sweeps the
+ * window forward. The continuation methods take these same options plus a raw cursor string.
  */
 export interface PlanStreamRequestOptions {
   readonly origin: Location;
@@ -227,10 +200,6 @@ export interface PlanStreamRequestOptions {
   readonly targetResults?: number;
   /** Cap on how far forward the sweep searches, in minutes (default 360 = 6h). */
   readonly maxWindowMinutes?: number;
-  /** Continue a prior stream forward from a `page` event's `endCursor`. */
-  readonly after?: string;
-  /** Continue a prior stream backward from a `page` event's `startCursor`. */
-  readonly before?: string;
 }
 
 export interface DeparturesOptions {
@@ -239,8 +208,6 @@ export interface DeparturesOptions {
 }
 
 const DEFAULT_SEARCH_WINDOW_MINUTES = 60;
-const DEFAULT_MAX_TRAVERSAL_MINUTES = 360;
-const DEFAULT_TARGET_RESULTS = 10;
 const DEFAULT_STREAM_TARGET_RESULTS = 5;
 const DEFAULT_MAX_WINDOW_MINUTES = 360;
 const DEFAULT_TIME_RANGE_SECONDS = 24 * 60 * 60;
@@ -299,23 +266,50 @@ export class SpiderRouting {
   /**
    * Streams itineraries over Server-Sent Events as the router sweeps the search window forward, emitting them
    * as they finalize instead of one batched page. Lazy and cancellable: iteration opens the request, and
-   * `break`ing out of the `for await` cancels the underlying stream. Each `chunk` event carries itineraries
-   * with realtime delays already on their legs; a `page` event then carries the continuation cursors and a
-   * `done` event closes the stream (or a terminal `failure`). Never throws for transport/HTTP/server errors —
-   * they surface as a `failure` event — except a contract-version mismatch, which throws like the batch calls.
+   * `break`ing out of the `for await` cancels the underlying stream. Each `result` event carries itineraries
+   * with realtime delays already on their legs; a terminal `done` event then carries the continuation
+   * {@link RoutePageInfo} (or a terminal `failure`). Never throws for transport/HTTP/server errors — they
+   * surface as a `failure` event — except a contract-version mismatch, which throws like the batch calls.
    *
    * `targetResults` is a soft floor the sweep aims to reach; `maxWindowMinutes` caps how far forward it
-   * searches. To continue, re-call with the same inputs plus `after` = the last `page` event's `endCursor`
-   * (or `before` = `startCursor` to walk earlier). For a single batched page instead, use {@link plan}.
+   * searches. This opens a fresh stream; to continue, call {@link planStreamNext} with `done.pageInfo.endCursor`
+   * (when `hasNextPage`) or {@link planStreamPrevious} with `done.pageInfo.startCursor` (when `hasPreviousPage`).
+   * For a single batched page instead, use {@link plan}.
    */
   async *planStream(options: PlanStreamRequestOptions): AsyncGenerator<PlanStreamEvent> {
+    yield* this.openPlanStream(this.streamVariables(options));
+  }
+
+  /**
+   * Continues a stream forward from a prior `done` event's `endCursor`. Takes the same options as
+   * {@link planStream} (so `targetResults` / `maxWindowMinutes` can vary per continuation) plus the raw cursor.
+   * Call only when the prior `done.pageInfo.hasNextPage` was true.
+   */
+  async *planStreamNext(options: PlanStreamRequestOptions, after: string): AsyncGenerator<PlanStreamEvent> {
+    yield* this.openPlanStream(this.streamVariables(options, { after }));
+  }
+
+  /**
+   * Continues a stream backward from a prior `done` event's `startCursor`. Takes the same options as
+   * {@link planStream} plus the raw cursor. Call only when the prior `done.pageInfo.hasPreviousPage` was true.
+   */
+  async *planStreamPrevious(options: PlanStreamRequestOptions, before: string): AsyncGenerator<PlanStreamEvent> {
+    yield* this.openPlanStream(this.streamVariables(options, { before }));
+  }
+
+  // Builds the SSE request variables from the public options plus an optional raw continuation cursor. Forward
+  // paging sets `after`, backward sets `before`; an initial stream sets neither.
+  private streamVariables(
+    options: PlanStreamRequestOptions,
+    cursor?: { readonly after?: string; readonly before?: string },
+  ): PlanConnectionStreamVariables {
     const time: RouteTimeSpec = options.arriveBy != null
       ? { kind: 'arriveBy', epochMs: toEpochMs(options.arriveBy) }
       : { kind: 'departAt', epochMs: toEpochMs(options.departAt ?? Date.now()) };
     const iso = new Date(time.epochMs).toISOString();
     const via = options.via ?? [];
     const maxWindowMinutes = Math.max(1, Math.floor(options.maxWindowMinutes ?? DEFAULT_MAX_WINDOW_MINUTES));
-    const variables: PlanConnectionStreamVariables = {
+    return {
       dateTime: time.kind === 'departAt' ? { earliestDeparture: iso } : { latestArrival: iso },
       origin: locationToInput(options.origin),
       destination: locationToInput(options.destination),
@@ -327,10 +321,9 @@ export class SpiderRouting {
       }),
       targetResults: options.targetResults ?? DEFAULT_STREAM_TARGET_RESULTS,
       maxWindow: `PT${maxWindowMinutes}M`,
-      before: options.before,
-      after: options.after,
+      before: cursor?.before,
+      after: cursor?.after,
     };
-    yield* this.openPlanStream(variables);
   }
 
   // Opens the SSE `plan-stream` request and turns its `chunk`/`pageInfo`/`done`/`error` records into a
@@ -343,7 +336,7 @@ export class SpiderRouting {
       response = await this.transport.stream(PLAN_STREAM, variables);
     } catch (e) {
       if (e instanceof SpiderContractMismatchError) throw e;
-      yield { kind: 'failure', error: toSpiderError(e) };
+      yield { type: 'failure', error: toSpiderError(e) };
       return;
     }
     if (!response.ok) {
@@ -351,12 +344,12 @@ export class SpiderRouting {
       const env = parseErrorEnvelope(text);
       const detail = env.message ?? text.slice(0, 300);
       const err = new TransportError('http', `routing plan-stream -> ${response.status}: ${detail}`, response.status, env.code);
-      yield { kind: 'failure', error: toSpiderError(err) };
+      yield { type: 'failure', error: toSpiderError(err) };
       return;
     }
     const body = response.body;
     if (body == null) {
-      yield { kind: 'failure', error: toSpiderError(new TransportError('no_data', 'routing plan-stream returned no body')) };
+      yield { type: 'failure', error: toSpiderError(new TransportError('no_data', 'routing plan-stream returned no body')) };
       return;
     }
     const reader = body.getReader();
@@ -381,7 +374,7 @@ export class SpiderRouting {
       const event = parsePlanStreamRecord(record.event, record.data);
       if (event != null) yield event;
     } catch (e) {
-      yield { kind: 'failure', error: toSpiderError(e) };
+      yield { type: 'failure', error: toSpiderError(e) };
     } finally {
       await reader.cancel().catch(() => {});
     }
@@ -397,68 +390,6 @@ export class SpiderRouting {
     if (!route.pageInfo.hasPreviousPage) return null;
     // Backward paging = before (no count; the server returns a whole window per page).
     return this.page(requestOf(route), route.pageInfo.startCursor ?? undefined, undefined);
-  }
-
-  /**
-   * Streams itineraries by stepping the search forward one search window at a time, until `targetResults`
-   * itineraries have been collected or `maxTraversalMinutes` of time has been traversed. Each step pulls a
-   * whole window in one search, so a busy window yields more — `targetResults` is a soft floor, the window
-   * that reaches it is yielded whole. Lazy: `for await ... break` stops stepping and skips the remaining OTP
-   * searches. Each yield is one step's `SpiderResult` (a terminal error ends the stream), matching the
-   * non-throwing poll helpers.
-   *
-   * The step is `searchWindowMinutes` and it is fixed for the whole walk — OTP locks the window into the
-   * paging cursor after the first search and ignores it thereafter, so a wider step means a wider
-   * `searchWindowMinutes` here, not on a continuation.
-   */
-  async *planUntil(options: PlanStreamOptions): AsyncGenerator<SpiderResult<Route>> {
-    const { targetResults, maxTraversalMinutes, ...planOptions } = options;
-    const target = targetResults ?? DEFAULT_TARGET_RESULTS;
-    const steps = stepCount(
-      maxTraversalMinutes ?? DEFAULT_MAX_TRAVERSAL_MINUTES,
-      options.searchWindowMinutes ?? DEFAULT_SEARCH_WINDOW_MINUTES,
-    );
-    const first = await this.plan(planOptions);
-    yield first;
-    if (!first.isSuccess) return;
-    yield* this.stepFrom(first.data, 'forward', steps - 1, target, first.data.edges.length);
-  }
-
-  /** Streaming form of `planNext`: steps forward from `prev`, one (fixed) search window per step. */
-  async *planNextUntil(prev: Route, options?: PlanStreamPageOptions): AsyncGenerator<SpiderResult<Route>> {
-    const steps = stepCount(options?.maxTraversalMinutes ?? DEFAULT_MAX_TRAVERSAL_MINUTES, requestOf(prev).searchWindowMinutes);
-    yield* this.stepFrom(prev, 'forward', steps, options?.targetResults ?? DEFAULT_TARGET_RESULTS, 0);
-  }
-
-  /** Streaming form of `planPrevious`: steps backward from `prev`, one (fixed) search window per step. */
-  async *planPreviousUntil(prev: Route, options?: PlanStreamPageOptions): AsyncGenerator<SpiderResult<Route>> {
-    const steps = stepCount(options?.maxTraversalMinutes ?? DEFAULT_MAX_TRAVERSAL_MINUTES, requestOf(prev).searchWindowMinutes);
-    yield* this.stepFrom(prev, 'backward', steps, options?.targetResults ?? DEFAULT_TARGET_RESULTS, 0);
-  }
-
-  // Step from `start` one search window at a time, accumulating itinerary count. Stop at `targetResults`, when a
-  // step has no next page, or on an error. `collectedSoFar` seeds the count (planUntil already yielded step 1).
-  private async *stepFrom(
-    start: Route,
-    direction: 'forward' | 'backward',
-    remainingSteps: number,
-    targetResults: number,
-    collectedSoFar: number,
-  ): AsyncGenerator<SpiderResult<Route>> {
-    if (collectedSoFar >= targetResults) return;
-    let prev = start;
-    let collected = collectedSoFar;
-    for (let i = 0; i < Math.max(0, remainingSteps); i++) {
-      const res = direction === 'forward'
-        ? await this.planNext(prev)
-        : await this.planPrevious(prev);
-      if (res === null) return;
-      yield res;
-      if (!res.isSuccess) return;
-      collected += res.data.edges.length;
-      if (collected >= targetResults) return;
-      prev = res.data;
-    }
   }
 
   async departures(
@@ -571,12 +502,6 @@ function clampSeconds(seconds: number): number {
   return Math.max(0, Math.min(Math.floor(seconds), INT_MAX));
 }
 
-// Each cursor step advances a full (fixed) search window, so the number of steps to traverse the total time
-// is a plain division by the step — no searchWindowUsed math.
-function stepCount(maxTraversalMinutes: number, stepMinutes: number): number {
-  return Math.max(1, Math.floor(maxTraversalMinutes / Math.max(1, stepMinutes)));
-}
-
 function locationToInput(location: Location): PlanLabeledLocationInput {
   if (location.kind === 'stop') {
     return { location: { stopLocation: { stopLocationId: location.id } } };
@@ -637,22 +562,21 @@ function durationSecondsFromWire(raw: string | null | undefined): number | null 
 const SSE_DEFAULT_EVENT = 'message';
 
 // Parses one finished SSE record (its event name + accumulated data) into a PlanStreamEvent; returns null for
-// records the SDK doesn't surface (heartbeats, unknown events). A malformed payload becomes a terminal
-// `failure` rather than throwing. Exported so the wire-contract test exercises it directly.
+// records the SDK doesn't surface (heartbeats, unknown events, the terminal `done` telemetry frame). A
+// malformed payload becomes a terminal `failure` rather than throwing. Exported so the wire-contract test
+// exercises it directly. A `chunk` frame → `result`; the `pageInfo` frame → terminal `done` (carrying the
+// RoutePageInfo); the wire `done` telemetry frame just ends the stream and is dropped.
 export function parsePlanStreamRecord(event: string, data: string): PlanStreamEvent | null {
   if (data.trim() === '') return null;
   switch (event) {
     case 'chunk':
       return decodeStreamRecord('chunk', data, (chunk: StreamChunkWire) => ({
-        kind: 'chunk',
-        frontierSeconds: chunk.frontier ?? 0,
-        found: chunk.found ?? 0,
-        finalized: chunk.finalized ?? 0,
+        type: 'result',
         itineraries: (chunk.results ?? []).map(mapItinerary),
       }));
     case 'pageInfo':
       return decodeStreamRecord('pageInfo', data, (page: StreamPageInfoWire) => ({
-        kind: 'page',
+        type: 'done',
         pageInfo: {
           startCursor: page.startCursor ?? null,
           endCursor: page.endCursor ?? null,
@@ -661,26 +585,18 @@ export function parsePlanStreamRecord(event: string, data: string): PlanStreamEv
           searchWindowUsed: page.searchWindowUsed ?? null,
         },
       }));
-    case 'done':
-      return decodeStreamRecord('done', data, (done: StreamDoneWire) => ({
-        kind: 'done',
-        iterations: done.iterations ?? 0,
-        windowSeconds: done.windowSeconds ?? 0,
-        resultCount: done.resultCount ?? 0,
-        stoppedBy: done.stoppedBy ?? 'unknown',
-      }));
     case 'error':
-      return { kind: 'failure', error: streamErrorToSpiderError(data) };
+      return { type: 'failure', error: streamErrorToSpiderError(data) };
     default:
       return null;
   }
 }
 
-function decodeStreamRecord<W>(kind: string, data: string, map: (parsed: W) => PlanStreamEvent): PlanStreamEvent {
+function decodeStreamRecord<W>(frame: string, data: string, map: (parsed: W) => PlanStreamEvent): PlanStreamEvent {
   try {
     return map(JSON.parse(data) as W);
   } catch (e) {
-    return { kind: 'failure', error: toSpiderError(new DecodingError(`failed to decode plan-stream ${kind}`, e)) };
+    return { type: 'failure', error: toSpiderError(new DecodingError(`failed to decode plan-stream ${frame}`, e)) };
   }
 }
 
@@ -731,9 +647,6 @@ async function drainText(response: Response): Promise<string> {
 }
 
 interface StreamChunkWire {
-  frontier?: number;
-  found?: number;
-  finalized?: number;
   results?: ItineraryWire[];
 }
 
@@ -743,13 +656,6 @@ interface StreamPageInfoWire {
   hasNextPage?: boolean;
   hasPreviousPage?: boolean;
   searchWindowUsed?: string | null;
-}
-
-interface StreamDoneWire {
-  iterations?: number;
-  windowSeconds?: number;
-  resultCount?: number;
-  stoppedBy?: string;
 }
 
 interface StreamGraphQLError {

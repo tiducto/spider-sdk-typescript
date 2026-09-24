@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.7.1 — 2026-09-25
+
+Targets Spider API contract 0.7 (unchanged). Pre-1.0 release — the public API is not yet stable and may
+change in backward-incompatible ways before 1.0.0.
+
+### Changed
+
+- **Streaming trip planning is initial + directional continuation.** `SpiderRouting.planStream(...)` opens a
+  fresh stream, and its `PlanStreamEvent` is a three-variant discriminated union on `type`: `result` (a batch
+  of finalized itineraries, with realtime delays on their legs), the terminal `done` (carrying the
+  continuation `RoutePageInfo` — `endCursor` / `startCursor` / `hasNextPage` / `hasPreviousPage`), and
+  `failure`. Continue a stream with `planStreamNext(options, endCursor)` (forward) or
+  `planStreamPrevious(options, startCursor)` (backward) — both take the same options as `planStream` plus a
+  raw cursor string. Batch planning (`plan` / `planNext` / `planPrevious`) is unchanged.
+
+### Removed
+
+- `planUntil` / `planNextUntil` / `planPreviousUntil` and the `PlanStreamOptions` / `PlanStreamPageOptions`
+  types. Sweep the window with `planStream` and continue via `Done.pageInfo`.
+
 ## 0.7.0 — 2026-09-25
 
 Targets Spider API contract 0.7. Pre-1.0 release — the public API is not yet stable and may change
