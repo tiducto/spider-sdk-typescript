@@ -112,6 +112,33 @@ export class Transport {
     return parseJson<D>(text, `POST ${path}`);
   }
 
+  /**
+   * Opens a Server-Sent Events stream: POSTs `{ id, variables }` to `/routing/{op.path}` and returns the raw
+   * streaming {@link Response} for the caller to read frame-by-frame. Unlike {@link send}, it does not
+   * auto-retry — a streamed response is consumed over time, so retrying (or aborting once the body is
+   * flowing) makes no sense; the connect timeout guards only the initial handshake and is cleared the moment
+   * the response headers arrive, leaving the body to stream uninterrupted.
+   */
+  async stream(op: { id: string; path: string }, variables: unknown): Promise<Response> {
+    const headers = this.contractHeaders({ 'content-type': 'application/json', accept: 'text/event-stream' });
+    headers.set('apikey', this.apiKey);
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), this.timeoutMs);
+    let res: Response;
+    try {
+      res = await this.doFetch(`${this.baseUrl}/routing/${op.path}`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ id: op.id, variables }),
+        signal: controller.signal,
+      });
+    } finally {
+      clearTimeout(timer);
+    }
+    checkContract(res.headers.get(CONTRACT_HEADER));
+    return res;
+  }
+
   async getJson<D>(path: string, query?: Record<string, string>): Promise<D> {
     const raw = await this.getRaw(path, query);
     if (!raw.ok) {

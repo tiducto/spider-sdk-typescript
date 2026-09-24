@@ -252,3 +252,35 @@ export async function planWithErrorHandling(client: SpiderClient) {
     }
   }
 }
+
+export async function streamTrip(client: SpiderClient) {
+  // Server-push streaming over SSE: itineraries (with realtime delays on their legs) arrive as the router
+  // sweeps the window, rather than one batched page. Never throws — a transport/server error arrives as a
+  // `failure` event. `break` out of the loop to stop the sweep and cancel the stream.
+  for await (const event of client.routing.planStream({
+    origin: Location.coordinate(49.1951, 16.6068),
+    destination: Location.coordinate(49.2246, 16.5747),
+    departAt: new Date(),
+    targetResults: 5,       // soft floor: keep sweeping until at least this many are found
+    maxWindowMinutes: 180,  // cap the forward sweep
+  })) {
+    switch (event.kind) {
+      case 'chunk':
+        for (const itinerary of event.itineraries) {
+          const delay = itinerary.legs[0]?.startDelaySeconds ?? 0
+          console.log(`${itinerary.start} → ${itinerary.end}  ·  ${delay >= 0 ? '+' : ''}${delay}s`)
+        }
+        break
+      case 'page':
+        // Re-call planStream with `after: event.pageInfo.endCursor` to continue the sweep forward.
+        console.log(`more available: ${event.pageInfo.hasNextPage}`)
+        break
+      case 'done':
+        console.log(`done after ${event.iterations} iterations (${event.stoppedBy}), ${event.resultCount} results`)
+        break
+      case 'failure':
+        console.error('Stream failed:', event.error.code, event.error.message)
+        break
+    }
+  }
+}

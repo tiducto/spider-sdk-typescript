@@ -22,8 +22,11 @@ const PLAN_ENVELOPE = {
             legs: [
               {
                 mode: 'TRAM',
-                start: { scheduledTime: '2026-07-20T08:00:00Z' },
-                end: { scheduledTime: '2026-07-20T08:15:00Z' },
+                start: { scheduledTime: '2026-07-20T08:00:00Z', estimated: { time: '2026-07-20T08:02:00Z', delay: 'PT120S' } },
+                end: { scheduledTime: '2026-07-20T08:15:00Z', estimated: { time: '2026-07-20T08:16:00Z', delay: 'PT60S' } },
+                realtimeState: 'UPDATED',
+                realTime: true,
+                serviceDate: '20260720',
                 from: { name: 'A', stop: { wheelchairBoarding: 'POSSIBLE' } },
                 to: { name: 'B', stop: { wheelchairBoarding: 'NOT_POSSIBLE' } },
                 route: { shortName: '1', longName: 'Line 1' },
@@ -86,6 +89,13 @@ test('plan posts the persisted query and maps the route', async () => {
   assert.equal(leg.fromWheelchair, 'Possible');
   assert.equal(leg.toWheelchair, 'NotPossible');
   assert.ok(leg.geometry.length > 0);
+  // Realtime delays ride the shared wire→domain mapper, so the one-shot plan surfaces them too.
+  assert.equal(leg.isRealtime, true);
+  assert.equal(leg.realtimeState, 'UPDATED');
+  assert.equal(leg.startDelaySeconds, 120);
+  assert.equal(leg.endDelaySeconds, 60);
+  assert.equal(leg.startEstimated, '2026-07-20T08:02:00Z');
+  assert.equal(leg.serviceDate, '20260720');
   assert.equal(route.pageInfo.hasNextPage, true);
 });
 

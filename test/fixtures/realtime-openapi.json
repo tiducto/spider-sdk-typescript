@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Tiducto Transit API — Realtime",
-    "version": "5.0",
+    "version": "0.7",
     "description": "GTFS-RT live data (vehicles, delays, alerts) — a plain-REST customer surface (poll-based, key-auth). Companion to routing and stops; the three share one pack version. Deliberately poll-only (cacheable, high-fanout) — no streaming/subscription surface, so it is OpenAPI, not AsyncAPI. Enum-ish fields are bare strings so unrecognized producer values pass through unchanged."
   },
   "servers": [
@@ -93,7 +93,7 @@
     },
     "/realtime/vehicles/by-trip/{id}": {
       "get": {
-        "summary": "Live vehicle for a single trip (404 = none currently reporting, a normal state).",
+        "summary": "Live vehicle for a single trip. Always 200 with a freshness envelope; `vehicle` is absent when none is currently reporting (a normal state, never 404).",
         "operationId": "realtime_vehicle_by_trip",
         "x-surface": "realtime",
         "parameters": [
@@ -108,7 +108,7 @@
         ],
         "responses": {
           "200": {
-            "description": "The vehicle (or null) plus feed freshness.",
+            "description": "Feed freshness plus the live vehicle, when one is reporting; `vehicle` is absent for a trip with none (a normal state, not an error).",
             "content": {
               "application/json": {
                 "schema": {
@@ -116,9 +116,6 @@
                 }
               }
             }
-          },
-          "404": {
-            "description": "No vehicle currently reporting for this trip (normal, not an error)."
           },
           "401": {
             "description": "Missing or invalid apikey.",
@@ -164,23 +161,34 @@
       }
     },
     "/realtime/delays": {
-      "get": {
-        "summary": "Live schedule deviation for the given trips.",
+      "post": {
+        "summary": "Live schedule deviation, resolved per trip instance (trip_id + service date).\n  Group the trip ids you want by the GTFS serviceDate — ISO-8601 YYYY-MM-DD, the\n  same value each plan leg's serviceDate carries — take it from the plan leg,\n  never from the departure clock time (GTFS times may exceed 24:00). A trip\n  instance the feed doesn't hold comes back in that group's `missing`, not\n  painted with another day's delay.",
         "operationId": "realtime_delays",
         "x-surface": "realtime",
-        "parameters": [
-          {
-            "name": "tripIds",
-            "in": "query",
-            "required": true,
-            "schema": {
-              "type": "string"
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DelaysRequest"
+              },
+              "example": {
+                "queries": [
+                  {
+                    "serviceDate": "2026-09-22",
+                    "tripIds": [
+                      "1:39822",
+                      "1:39823"
+                    ]
+                  }
+                ]
+              }
             }
           }
-        ],
+        },
         "responses": {
           "200": {
-            "description": "Delays found, plus any missing trip ids and feed freshness.",
+            "description": "Delays grouped by service date, each with its missing trip ids, plus global feed freshness.",
             "content": {
               "application/json": {
                 "schema": {
@@ -388,9 +396,68 @@
           }
         }
       },
-      "DelaysResponse": {
+      "DelaysRequest": {
+        "type": "object",
+        "description": "POST body for `/realtime/delays`. Delays are resolved per trip *instance*: a GTFS-RT TripUpdate is bound to a trip instance by (trip_id, start_date), so trip ids are grouped by the GTFS `serviceDate` they run on. Group ids by date rather than sending flat (tripId, serviceDate) pairs — the cardinality is 1-2 dates x many trips.",
+        "properties": {
+          "queries": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DelayQuery"
+            }
+          }
+        },
+        "required": [
+          "queries"
+        ]
+      },
+      "DelayQuery": {
         "type": "object",
         "properties": {
+          "serviceDate": {
+            "type": "string",
+            "description": "GTFS service date as ISO-8601 `YYYY-MM-DD` — the same format the plan leg's `serviceDate` carries, so pass it straight through. A service date is not a civil date (times may exceed 24:00), so take it from the plan leg, never derive it from the departure clock time. A non-ISO value is rejected with 400."
+          },
+          "tripIds": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "serviceDate",
+          "tripIds"
+        ]
+      },
+      "DelaysResponse": {
+        "type": "object",
+        "description": "Grouped to mirror the request: each result group attributes its delays to one `serviceDate`, so a returned delay is unambiguous. Feed freshness (`feedTimestamp`/`staleSeconds`) is global across the snapshot.",
+        "properties": {
+          "results": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DelayGroupResult"
+            }
+          },
+          "feedTimestamp": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "staleSeconds": {
+            "type": "integer",
+            "format": "int32"
+          }
+        }
+      },
+      "DelayGroupResult": {
+        "type": "object",
+        "description": "Delays for one service date. `missing` is per group — a trip id can be missing for one date yet present for another (the midnight overlap), which a single top-level `missing` would lose.",
+        "properties": {
+          "serviceDate": {
+            "type": "string",
+            "description": "GTFS service date as ISO-8601 `YYYY-MM-DD`, echoing the request."
+          },
           "delays": {
             "type": "array",
             "items": {
@@ -402,14 +469,6 @@
             "items": {
               "type": "string"
             }
-          },
-          "feedTimestamp": {
-            "type": "integer",
-            "format": "int64"
-          },
-          "staleSeconds": {
-            "type": "integer",
-            "format": "int32"
           }
         }
       },

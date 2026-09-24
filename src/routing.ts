@@ -1,14 +1,16 @@
 import type { Transport } from './http.ts';
 import type { SpiderResult } from './result.ts';
 import { failure, success } from './result.ts';
-import { SpiderContractMismatchError, TransportError, toSpiderError } from './errors.ts';
+import type { SpiderError } from './errors.ts';
+import { DecodingError, SpiderContractMismatchError, TransportError, parseErrorEnvelope, toSpiderError } from './errors.ts';
 import type { BikesAllowed, TransitMode, WheelchairBoarding } from './enums.ts';
 import { bikesAllowedFromWire, transitModeFromWire, wheelchairFromWire } from './enums.ts';
 import type { Location, ViaLocation } from './location.ts';
 import { decodePolyline } from './polyline.ts';
-import { DEPARTURES, PLAN, TRIP } from './persistedQueries.ts';
+import { DEPARTURES, PLAN, PLAN_STREAM, TRIP } from './persistedQueries.ts';
 import type {
   PlanConnectionData as PlanConnectionDataWire,
+  PlanConnectionStreamVariables,
   PlanConnectionVariables,
   PlanModesInput,
   PlanPreferencesInput,
@@ -37,6 +39,18 @@ export interface Leg {
   readonly mode: TransitMode | null;
   readonly startScheduled: string;
   readonly endScheduled: string;
+  /** Estimated (realtime-adjusted) departure ISO time, when the feed reported one; otherwise null. */
+  readonly startEstimated: string | null;
+  /** Estimated (realtime-adjusted) arrival ISO time, when the feed reported one; otherwise null. */
+  readonly endEstimated: string | null;
+  /** Departure schedule deviation in seconds (positive = late), when known; otherwise null. */
+  readonly startDelaySeconds: number | null;
+  /** Arrival schedule deviation in seconds (positive = late), when known; otherwise null. */
+  readonly endDelaySeconds: number | null;
+  readonly isRealtime: boolean;
+  readonly realtimeState: RealtimeState | null;
+  /** GTFS service date this leg's trip runs on (`YYYYMMDD`) — pass to realtime `delays` lookups. */
+  readonly serviceDate: string | null;
   readonly fromName: string | null;
   readonly toName: string | null;
   readonly routeShortName: string | null;
@@ -87,6 +101,43 @@ export interface Route {
   readonly routingErrors: readonly RoutingError[];
   readonly searchDateTime: string | null;
 }
+
+/**
+ * One event from {@link SpiderRouting.planStream}. The router sweeps the search window forward and pushes
+ * itineraries as they finalize: zero or more `chunk`s, then a `page` with the continuation cursors, then a
+ * terminal `done`. A `failure` is terminal and takes the place of the rest.
+ */
+export type PlanStreamEvent =
+  | {
+      /** A batch of finalized itineraries as the search frontier advances (with realtime delays on their legs). */
+      readonly kind: 'chunk';
+      /** How far (seconds from the search start) the window has swept. */
+      readonly frontierSeconds: number;
+      /** Running count of itineraries discovered so far. */
+      readonly found: number;
+      /** Count of itineraries committed (finalized) so far. */
+      readonly finalized: number;
+      readonly itineraries: readonly Itinerary[];
+    }
+  | {
+      /** Continuation cursors for the stream, mirroring {@link Route.pageInfo}. */
+      readonly kind: 'page';
+      readonly pageInfo: RoutePageInfo;
+    }
+  | {
+      /** Terminal summary once the sweep stops. */
+      readonly kind: 'done';
+      readonly iterations: number;
+      readonly windowSeconds: number;
+      readonly resultCount: number;
+      /** Why the sweep stopped (e.g. `targetResults` or `maxWindow`). */
+      readonly stoppedBy: string;
+    }
+  | {
+      /** Terminal failure — a transport/HTTP problem, a decoding error, or a server `error` event. */
+      readonly kind: 'failure';
+      readonly error: SpiderError;
+    };
 
 export interface Departure {
   readonly scheduledTimeEpochMs: number;
@@ -158,6 +209,30 @@ export interface PlanStreamPageOptions {
   readonly maxTraversalMinutes?: number;
 }
 
+/**
+ * Options for {@link SpiderRouting.planStream} — the server-push SSE stream. Distinct from `planUntil`, which
+ * window-walks batch calls client-side: `planStream` opens one long-lived Server-Sent Events request and the
+ * router pushes itineraries (with realtime delays) as it sweeps the window forward.
+ */
+export interface PlanStreamRequestOptions {
+  readonly origin: Location;
+  readonly destination: Location;
+  readonly departAt?: number | Date;
+  readonly arriveBy?: number | Date;
+  readonly via?: readonly ViaLocation[];
+  readonly allowedTransitModes?: readonly TransitMode[];
+  readonly maxTransfers?: number;
+  readonly wheelchairAccessible?: boolean;
+  /** Soft floor: the router keeps sweeping until at least this many itineraries are found (default 5). */
+  readonly targetResults?: number;
+  /** Cap on how far forward the sweep searches, in minutes (default 360 = 6h). */
+  readonly maxWindowMinutes?: number;
+  /** Continue a prior stream forward from a `page` event's `endCursor`. */
+  readonly after?: string;
+  /** Continue a prior stream backward from a `page` event's `startCursor`. */
+  readonly before?: string;
+}
+
 export interface DeparturesOptions {
   readonly startTime?: number | Date;
   readonly timeRangeSeconds?: number;
@@ -166,6 +241,8 @@ export interface DeparturesOptions {
 const DEFAULT_SEARCH_WINDOW_MINUTES = 60;
 const DEFAULT_MAX_TRAVERSAL_MINUTES = 360;
 const DEFAULT_TARGET_RESULTS = 10;
+const DEFAULT_STREAM_TARGET_RESULTS = 5;
+const DEFAULT_MAX_WINDOW_MINUTES = 360;
 const DEFAULT_TIME_RANGE_SECONDS = 24 * 60 * 60;
 const INT_MAX = 2_147_483_647;
 
@@ -217,6 +294,97 @@ export class SpiderRouting {
       wheelchairAccessible: options.wheelchairAccessible ?? false,
     };
     return this.page(request);
+  }
+
+  /**
+   * Streams itineraries over Server-Sent Events as the router sweeps the search window forward, emitting them
+   * as they finalize instead of one batched page. Lazy and cancellable: iteration opens the request, and
+   * `break`ing out of the `for await` cancels the underlying stream. Each `chunk` event carries itineraries
+   * with realtime delays already on their legs; a `page` event then carries the continuation cursors and a
+   * `done` event closes the stream (or a terminal `failure`). Never throws for transport/HTTP/server errors —
+   * they surface as a `failure` event — except a contract-version mismatch, which throws like the batch calls.
+   *
+   * `targetResults` is a soft floor the sweep aims to reach; `maxWindowMinutes` caps how far forward it
+   * searches. To continue, re-call with the same inputs plus `after` = the last `page` event's `endCursor`
+   * (or `before` = `startCursor` to walk earlier). For a single batched page instead, use {@link plan}.
+   */
+  async *planStream(options: PlanStreamRequestOptions): AsyncGenerator<PlanStreamEvent> {
+    const time: RouteTimeSpec = options.arriveBy != null
+      ? { kind: 'arriveBy', epochMs: toEpochMs(options.arriveBy) }
+      : { kind: 'departAt', epochMs: toEpochMs(options.departAt ?? Date.now()) };
+    const iso = new Date(time.epochMs).toISOString();
+    const via = options.via ?? [];
+    const maxWindowMinutes = Math.max(1, Math.floor(options.maxWindowMinutes ?? DEFAULT_MAX_WINDOW_MINUTES));
+    const variables: PlanConnectionStreamVariables = {
+      dateTime: time.kind === 'departAt' ? { earliestDeparture: iso } : { latestArrival: iso },
+      origin: locationToInput(options.origin),
+      destination: locationToInput(options.destination),
+      via: via.length > 0 ? via.map(viaToInput) : undefined,
+      modes: modesInput(options.allowedTransitModes ?? []),
+      preferences: preferencesInput({
+        maxTransfers: options.maxTransfers,
+        wheelchairAccessible: options.wheelchairAccessible ?? false,
+      }),
+      targetResults: options.targetResults ?? DEFAULT_STREAM_TARGET_RESULTS,
+      maxWindow: `PT${maxWindowMinutes}M`,
+      before: options.before,
+      after: options.after,
+    };
+    yield* this.openPlanStream(variables);
+  }
+
+  // Opens the SSE `plan-stream` request and turns its `chunk`/`pageInfo`/`done`/`error` records into a
+  // PlanStreamEvent stream. A non-2xx response, a transport error, or a decoding slip becomes a terminal
+  // `failure` event rather than a throw (a contract mismatch still throws). Reading stops when the server
+  // closes the stream or the consumer stops iterating (which cancels the reader → aborts the request).
+  private async *openPlanStream(variables: PlanConnectionStreamVariables): AsyncGenerator<PlanStreamEvent> {
+    let response: Response;
+    try {
+      response = await this.transport.stream(PLAN_STREAM, variables);
+    } catch (e) {
+      if (e instanceof SpiderContractMismatchError) throw e;
+      yield { kind: 'failure', error: toSpiderError(e) };
+      return;
+    }
+    if (!response.ok) {
+      const text = await drainText(response);
+      const env = parseErrorEnvelope(text);
+      const detail = env.message ?? text.slice(0, 300);
+      const err = new TransportError('http', `routing plan-stream -> ${response.status}: ${detail}`, response.status, env.code);
+      yield { kind: 'failure', error: toSpiderError(err) };
+      return;
+    }
+    const body = response.body;
+    if (body == null) {
+      yield { kind: 'failure', error: toSpiderError(new TransportError('no_data', 'routing plan-stream returned no body')) };
+      return;
+    }
+    const reader = body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+    try {
+      for (;;) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buffer = (buffer + decoder.decode(value, { stream: true })).replace(/\r\n/g, '\n');
+        // SSE records are separated by a blank line; parse every complete one and keep the remainder buffered.
+        let boundary: number;
+        while ((boundary = buffer.indexOf('\n\n')) !== -1) {
+          const record = parseSseFrame(buffer.slice(0, boundary));
+          buffer = buffer.slice(boundary + 2);
+          const event = parsePlanStreamRecord(record.event, record.data);
+          if (event != null) yield event;
+        }
+      }
+      // A trailing record the server didn't terminate with a blank line before closing.
+      const record = parseSseFrame(buffer);
+      const event = parsePlanStreamRecord(record.event, record.data);
+      if (event != null) yield event;
+    } catch (e) {
+      yield { kind: 'failure', error: toSpiderError(e) };
+    } finally {
+      await reader.cancel().catch(() => {});
+    }
   }
 
   async planNext(route: Route): Promise<SpiderResult<Route> | null> {
@@ -441,7 +609,7 @@ function modesInput(modes: readonly TransitMode[]): PlanModesInput | undefined {
   return transit.length > 0 ? { transit: { transit } } : undefined;
 }
 
-function preferencesInput(request: PlanRequest): PlanPreferencesInput | undefined {
+function preferencesInput(request: { maxTransfers?: number; wheelchairAccessible: boolean }): PlanPreferencesInput | undefined {
   // The router indexes legs with leg 0 = the initial access (walk, or nothing), so its wire
   // `maximumTransfers` counts boardings = transfers + 1 (wire 0 = walk-only, not exposed here).
   // `maxTransfers` is a transfer count, so map it to boardings: 0 transfers = 1 boarding (direct).
@@ -451,6 +619,142 @@ function preferencesInput(request: PlanRequest): PlanPreferencesInput | undefine
   const accessibility = request.wheelchairAccessible ? { wheelchair: { enabled: true } } : undefined;
   if (transit === undefined && accessibility === undefined) return undefined;
   return { transit, accessibility };
+}
+
+// ISO-8601 time-only duration (e.g. "PT1M30S", "PT-90S") → seconds, with a plain-integer-seconds fallback;
+// mirrors the batch plan's realtime-delay handling. Returns null for absent or unparseable values.
+function durationSecondsFromWire(raw: string | null | undefined): number | null {
+  if (raw == null) return null;
+  const iso = /^(-)?PT(?:(-?\d+)H)?(?:(-?\d+)M)?(?:(-?\d+(?:\.\d+)?)S)?$/i.exec(raw);
+  if (iso != null && (iso[2] != null || iso[3] != null || iso[4] != null)) {
+    const sign = iso[1] === '-' ? -1 : 1;
+    return sign * (Number(iso[2] ?? 0) * 3600 + Number(iso[3] ?? 0) * 60 + Number(iso[4] ?? 0));
+  }
+  const plain = Number(raw);
+  return Number.isFinite(plain) ? plain : null;
+}
+
+const SSE_DEFAULT_EVENT = 'message';
+
+// Parses one finished SSE record (its event name + accumulated data) into a PlanStreamEvent; returns null for
+// records the SDK doesn't surface (heartbeats, unknown events). A malformed payload becomes a terminal
+// `failure` rather than throwing. Exported so the wire-contract test exercises it directly.
+export function parsePlanStreamRecord(event: string, data: string): PlanStreamEvent | null {
+  if (data.trim() === '') return null;
+  switch (event) {
+    case 'chunk':
+      return decodeStreamRecord('chunk', data, (chunk: StreamChunkWire) => ({
+        kind: 'chunk',
+        frontierSeconds: chunk.frontier ?? 0,
+        found: chunk.found ?? 0,
+        finalized: chunk.finalized ?? 0,
+        itineraries: (chunk.results ?? []).map(mapItinerary),
+      }));
+    case 'pageInfo':
+      return decodeStreamRecord('pageInfo', data, (page: StreamPageInfoWire) => ({
+        kind: 'page',
+        pageInfo: {
+          startCursor: page.startCursor ?? null,
+          endCursor: page.endCursor ?? null,
+          hasNextPage: page.hasNextPage ?? false,
+          hasPreviousPage: page.hasPreviousPage ?? false,
+          searchWindowUsed: page.searchWindowUsed ?? null,
+        },
+      }));
+    case 'done':
+      return decodeStreamRecord('done', data, (done: StreamDoneWire) => ({
+        kind: 'done',
+        iterations: done.iterations ?? 0,
+        windowSeconds: done.windowSeconds ?? 0,
+        resultCount: done.resultCount ?? 0,
+        stoppedBy: done.stoppedBy ?? 'unknown',
+      }));
+    case 'error':
+      return { kind: 'failure', error: streamErrorToSpiderError(data) };
+    default:
+      return null;
+  }
+}
+
+function decodeStreamRecord<W>(kind: string, data: string, map: (parsed: W) => PlanStreamEvent): PlanStreamEvent {
+  try {
+    return map(JSON.parse(data) as W);
+  } catch (e) {
+    return { kind: 'failure', error: toSpiderError(new DecodingError(`failed to decode plan-stream ${kind}`, e)) };
+  }
+}
+
+// Splits one raw SSE record into its event name (default "message") and data (multiple `data:` lines joined
+// with "\n"), per the SSE line format: `field: value`, a leading space after the colon stripped, `:` comments
+// and blank lines ignored.
+function parseSseFrame(record: string): { event: string; data: string } {
+  let event = SSE_DEFAULT_EVENT;
+  const data: string[] = [];
+  for (const line of record.split('\n')) {
+    if (line === '' || line.startsWith(':')) continue;
+    const colon = line.indexOf(':');
+    const field = colon === -1 ? line : line.slice(0, colon);
+    let value = colon === -1 ? '' : line.slice(colon + 1);
+    if (value.startsWith(' ')) value = value.slice(1);
+    if (field === 'event') event = value;
+    else if (field === 'data') data.push(value);
+  }
+  return { event, data: data.join('\n') };
+}
+
+// A stream `error` record is the same GraphQL error envelope the batch path returns, so it maps through the
+// same taxonomy — a top-level BAD_REQUEST becomes a typed bad_request (with its field), anything else server.
+function streamErrorToSpiderError(data: string): SpiderError {
+  let env: { errors?: StreamGraphQLError[]; message?: string };
+  try {
+    env = JSON.parse(data) as { errors?: StreamGraphQLError[]; message?: string };
+  } catch {
+    return toSpiderError(new TransportError('upstream', `plan-stream error: ${data.slice(0, 300)}`));
+  }
+  const errors = env.errors;
+  if (errors != null && errors.length > 0) {
+    const bad = errors.find((e) => e.extensions?.code === 'BAD_REQUEST');
+    if (bad != null) {
+      return toSpiderError(new TransportError('bad_request', bad.message, undefined, undefined, bad.extensions?.field));
+    }
+    return toSpiderError(new TransportError('upstream', `plan-stream errors: ${errors.map((e) => e.message).join(', ')}`));
+  }
+  return toSpiderError(new TransportError('upstream', `plan-stream error: ${env.message ?? data.slice(0, 300)}`));
+}
+
+async function drainText(response: Response): Promise<string> {
+  try {
+    return await response.text();
+  } catch {
+    return '';
+  }
+}
+
+interface StreamChunkWire {
+  frontier?: number;
+  found?: number;
+  finalized?: number;
+  results?: ItineraryWire[];
+}
+
+interface StreamPageInfoWire {
+  startCursor?: string | null;
+  endCursor?: string | null;
+  hasNextPage?: boolean;
+  hasPreviousPage?: boolean;
+  searchWindowUsed?: string | null;
+}
+
+interface StreamDoneWire {
+  iterations?: number;
+  windowSeconds?: number;
+  resultCount?: number;
+  stoppedBy?: string;
+}
+
+interface StreamGraphQLError {
+  message: string;
+  extensions?: { code?: string; field?: string } | null;
 }
 
 function mapItinerary(node: ItineraryWire): Itinerary {
@@ -470,6 +774,13 @@ function mapLeg(leg: LegWire): Leg {
     mode: transitModeFromWire(leg.mode),
     startScheduled: leg.start.scheduledTime,
     endScheduled: leg.end.scheduledTime,
+    startEstimated: leg.start.estimated?.time ?? null,
+    endEstimated: leg.end.estimated?.time ?? null,
+    startDelaySeconds: durationSecondsFromWire(leg.start.estimated?.delay),
+    endDelaySeconds: durationSecondsFromWire(leg.end.estimated?.delay),
+    isRealtime: leg.realTime ?? false,
+    realtimeState: leg.realtimeState ?? null,
+    serviceDate: leg.serviceDate ?? null,
     fromName: leg.from.name ?? null,
     toName: leg.to.name ?? null,
     routeShortName: leg.route?.shortName ?? null,
