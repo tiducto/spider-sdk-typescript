@@ -312,3 +312,135 @@ export async function streamTripContinue(client: SpiderClient) {
     }
   }
 }
+
+export async function streamForTime(client: SpiderClient) {
+  // Streaming counterpart of planForTime: sweep from a specific departure time, not "now".
+  for await (const event of client.routing.planStream({
+    origin: Location.coordinate(49.1951, 16.6068),
+    destination: Location.coordinate(49.2246, 16.5747),
+    departAt: new Date('2026-07-20T08:00:00Z'),
+    targetResults: 5,
+    maxWindowMinutes: 120,
+  })) {
+    switch (event.type) {
+      case 'result':
+        for (const itinerary of event.itineraries) console.log(`${itinerary.start} → ${itinerary.end}`)
+        break
+      case 'done':
+        break
+      case 'failure':
+        console.error('Stream failed:', event.error.code, event.error.message)
+        break
+    }
+  }
+}
+
+export async function streamArriveBy(client: SpiderClient) {
+  // Streaming counterpart of arriveBy: sweep by when you need to be there.
+  for await (const event of client.routing.planStream({
+    origin: Location.coordinate(49.1951, 16.6068),
+    destination: Location.coordinate(49.2246, 16.5747),
+    arriveBy: new Date('2026-07-20T09:00:00Z'),
+    targetResults: 5,
+    maxWindowMinutes: 120,
+  })) {
+    switch (event.type) {
+      case 'result':
+        for (const itinerary of event.itineraries) console.log(`${itinerary.start} → ${itinerary.end}`)
+        break
+      case 'done':
+        break
+      case 'failure':
+        console.error('Stream failed:', event.error.code, event.error.message)
+        break
+    }
+  }
+}
+
+export async function streamWithModes(client: SpiderClient) {
+  // Streaming counterpart of planWithModes: restrict the sweep to tram and subway only.
+  for await (const event of client.routing.planStream({
+    origin: Location.coordinate(49.1951, 16.6068),
+    destination: Location.coordinate(49.2246, 16.5747),
+    allowedTransitModes: ['TRAM', 'SUBWAY'],
+    targetResults: 5,
+    maxWindowMinutes: 120,
+  })) {
+    switch (event.type) {
+      case 'result':
+        for (const itinerary of event.itineraries) console.log(`${itinerary.start} → ${itinerary.end}`)
+        break
+      case 'done':
+        break
+      case 'failure':
+        console.error('Stream failed:', event.error.code, event.error.message)
+        break
+    }
+  }
+}
+
+export async function streamVia(client: SpiderClient) {
+  // Streaming counterpart of planVia: route through an intermediate stop, waiting at least 2 minutes there.
+  for await (const event of client.routing.planStream({
+    origin: Location.coordinate(49.1951, 16.6068),
+    destination: Location.coordinate(49.2246, 16.5747),
+    via: [ViaLocation.visit(Location.stop('U123Z1'), 120)],
+    targetResults: 5,
+    maxWindowMinutes: 120,
+  })) {
+    switch (event.type) {
+      case 'result':
+        for (const itinerary of event.itineraries) console.log(`${itinerary.start} → ${itinerary.end}`)
+        break
+      case 'done':
+        break
+      case 'failure':
+        console.error('Stream failed:', event.error.code, event.error.message)
+        break
+    }
+  }
+}
+
+export async function streamWheelchair(client: SpiderClient) {
+  // Streaming counterpart of wheelchairPlan: prefer step-free routing across the sweep.
+  for await (const event of client.routing.planStream({
+    origin: Location.coordinate(49.1951, 16.6068),
+    destination: Location.coordinate(49.2246, 16.5747),
+    wheelchairAccessible: true,
+    targetResults: 5,
+    maxWindowMinutes: 120,
+  })) {
+    switch (event.type) {
+      case 'result':
+        for (const itinerary of event.itineraries) console.log(`${itinerary.start} → ${itinerary.end}`)
+        break
+      case 'done':
+        break
+      case 'failure':
+        console.error('Stream failed:', event.error.code, event.error.message)
+        break
+    }
+  }
+}
+
+export async function streamWithLimits(client: SpiderClient) {
+  // Streaming counterpart of planWithOptions' transfer cap: at most 2 transfers in any itinerary.
+  for await (const event of client.routing.planStream({
+    origin: Location.coordinate(49.1951, 16.6068),
+    destination: Location.coordinate(49.2246, 16.5747),
+    maxTransfers: 2,
+    targetResults: 5,
+    maxWindowMinutes: 120,
+  })) {
+    switch (event.type) {
+      case 'result':
+        for (const itinerary of event.itineraries) console.log(`${itinerary.start} → ${itinerary.end}`)
+        break
+      case 'done':
+        break
+      case 'failure':
+        console.error('Stream failed:', event.error.code, event.error.message)
+        break
+    }
+  }
+}
