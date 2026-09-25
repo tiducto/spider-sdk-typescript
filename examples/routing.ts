@@ -444,3 +444,34 @@ export async function streamWithLimits(client: SpiderClient) {
     }
   }
 }
+
+export async function streamTripPrevious(client: SpiderClient) {
+  // Page a stream backward from the previous sweep's terminal `done` cursor — the earlier departures.
+  // The same options are passed again plus the raw startCursor.
+  const options = {
+    origin: Location.coordinate(49.1951, 16.6068),
+    destination: Location.coordinate(49.2246, 16.5747),
+    departAt: new Date(),
+    targetResults: 5,
+    maxWindowMinutes: 180,
+  }
+
+  let startCursor: string | null = null
+  let hasPreviousPage = false
+  for await (const event of client.routing.planStream(options)) {
+    if (event.type === 'done') {
+      hasPreviousPage = event.pageInfo.hasPreviousPage
+      startCursor = event.pageInfo.startCursor
+    }
+  }
+
+  if (hasPreviousPage && startCursor !== null) {
+    for await (const event of client.routing.planStreamPrevious(options, startCursor)) {
+      if (event.type === 'result') {
+        for (const itinerary of event.itineraries) {
+          console.log(`earlier: ${itinerary.start} → ${itinerary.end}`)
+        }
+      }
+    }
+  }
+}
