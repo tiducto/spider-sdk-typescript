@@ -254,9 +254,9 @@ export async function planWithErrorHandling(client: SpiderClient) {
 }
 
 export async function streamTrip(client: SpiderClient) {
-  // Server-push streaming over SSE: itineraries (with realtime delays on their legs) arrive as the router
-  // sweeps the window, rather than one batched page. Never throws — a transport/server error arrives as a
-  // `failure` event. `break` out of the loop to stop the sweep and cancel the stream.
+  // Streaming: itineraries (with realtime delays on their legs) arrive as they finalize, rather than one
+  // batched page. Never throws — a transport/server error arrives as a `failure` event. `break` out of the
+  // loop to stop the sweep and cancel the stream.
   for await (const event of client.routing.planStream({
     origin: Location.coordinate(49.1951, 16.6068),
     destination: Location.coordinate(49.2246, 16.5747),
