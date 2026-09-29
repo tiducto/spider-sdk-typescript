@@ -2,7 +2,6 @@ export type SpiderErrorCode =
   | 'network'
   | 'timeout'
   | 'unauthorized'
-  | 'update_required'
   | 'bad_request'
   | 'not_found'
   | 'server'
@@ -14,6 +13,11 @@ export interface SpiderError {
   readonly code: SpiderErrorCode;
   readonly message: string;
   readonly httpStatus?: number;
+  /**
+   * The server's machine-readable error code, when it sends one. An `unauthorized` whose `serverCode` is
+   * `persisted_query_rejected` means the API no longer serves a query this SDK version sends, so the fix is
+   * to update the SDK, not the key.
+   */
   readonly serverCode?: string;
   /**
    * For a `bad_request` (a server validation failure — over-cap `searchWindow`, malformed `via`, or a
@@ -87,16 +91,6 @@ export function toSpiderError(e: unknown): SpiderError {
   if (e instanceof TransportError) {
     if (e.kind === 'http') {
       const status = e.httpStatus ?? 0;
-      // The SDK only sends persisted-query ids from its own contract, so the gateway rejecting one means
-      // this SDK version's query has been retired.
-      if (status === 403 && e.serverCode === PERSISTED_QUERY_REJECTED) {
-        return {
-          code: 'update_required',
-          message: `The API no longer serves this SDK version's request; update the SDK (${e.message})`,
-          httpStatus: status,
-          serverCode: e.serverCode,
-        };
-      }
       const code: SpiderErrorCode =
         status === 401 || status === 403 ? 'unauthorized'
           : status === 404 ? 'not_found'
@@ -104,7 +98,12 @@ export function toSpiderError(e: unknown): SpiderError {
               : status === 429 ? 'rate_limited'
                 : status >= 500 && status <= 599 ? 'server'
                   : 'unknown';
-      return { code, message: e.message, httpStatus: status, serverCode: e.serverCode };
+      // The SDK only sends persisted-query ids from its own contract, so the gateway rejecting one means
+      // this SDK version's query has been retired.
+      const message = status === 403 && e.serverCode === PERSISTED_QUERY_REJECTED
+        ? `The API no longer serves this SDK version's request; update the SDK (${e.message})`
+        : e.message;
+      return { code, message, httpStatus: status, serverCode: e.serverCode };
     }
     if (e.kind === 'no_data') return { code: 'not_found', message: e.message };
     if (e.kind === 'bad_request') return { code: 'bad_request', message: e.message, field: e.field };

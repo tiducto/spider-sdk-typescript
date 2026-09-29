@@ -44,12 +44,14 @@ test('parseErrorEnvelope takes a code-shaped gateway `error` as the code, but no
   assert.deepEqual(parseErrorEnvelope('{"error":"Access to this API has been disallowed"}'), { code: undefined, message: undefined });
 });
 
-test('a 403 persisted_query_rejected maps to update_required; other 403s stay unauthorized', () => {
+test('a 403 persisted_query_rejected is unauthorized with an update-the-SDK message', () => {
   const retired = toSpiderError(new TransportError('http', 'routing plan -> 403: unknown persisted-query id: x', 403, 'persisted_query_rejected'));
-  assert.equal(retired.code, 'update_required');
+  assert.equal(retired.code, 'unauthorized');
   assert.equal(retired.httpStatus, 403);
   assert.equal(retired.serverCode, 'persisted_query_rejected');
   assert.match(retired.message, /update the SDK/);
-  assert.equal(toSpiderError(new TransportError('http', 'x', 403, 'key_not_allowed')).code, 'unauthorized');
+  const other = toSpiderError(new TransportError('http', 'x', 403, 'key_not_allowed'));
+  assert.equal(other.code, 'unauthorized');
+  assert.equal(other.message, 'x');
   assert.equal(toSpiderError(new TransportError('http', 'x', 400, 'persisted_query_rejected')).code, 'unknown');
 });

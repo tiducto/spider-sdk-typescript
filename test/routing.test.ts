@@ -312,7 +312,7 @@ test('a gateway declaring another contract major is not an error', async () => {
   assert.equal(result.isSuccess, true);
 });
 
-test('a retired persisted-query id becomes an update_required failure', async () => {
+test('a retired persisted-query id is an unauthorized failure that says to update the SDK', async () => {
   const mock = mockFetch({
     status: 403,
     json: { error: 'persisted_query_rejected', message: `unknown persisted-query id: ${PLAN.id}` },
@@ -321,7 +321,7 @@ test('a retired persisted-query id becomes an update_required failure', async ()
   const result = await client.routing.plan({ origin: Location.coordinate(1, 2), destination: Location.coordinate(3, 4) });
   assert.equal(result.isSuccess, false);
   if (!result.isSuccess) {
-    assert.equal(result.error.code, 'update_required');
+    assert.equal(result.error.code, 'unauthorized');
     assert.equal(result.error.httpStatus, 403);
     assert.equal(result.error.serverCode, 'persisted_query_rejected');
     assert.match(result.error.message, /update the SDK/);

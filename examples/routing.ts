@@ -219,10 +219,11 @@ export async function planWithErrorHandling(client: SpiderClient) {
   // minor release, so keep a default branch.
   switch (result.error.code) {
     case 'unauthorized':
-      console.error('Bad or missing apikey — it is scoped to one project + environment')
-      break
-    case 'update_required':
-      console.error('This app version is too old for the API — prompt the user to update')
+      if (result.error.serverCode === 'persisted_query_rejected') {
+        console.error('This app version is too old for the API — prompt the user to update')
+      } else {
+        console.error('Bad or missing apikey — it is scoped to one project + environment')
+      }
       break
     case 'bad_request':
       // A server validation failure: over-cap searchWindow, bad via, or a missing required field.

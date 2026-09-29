@@ -222,7 +222,7 @@ test('planStream with default options sends no maxWindow', async () => {
   assert.equal('maxWindow' in body.variables, false);
 });
 
-test('planStream surfaces a retired persisted-query id as an update_required failure', async () => {
+test('planStream surfaces a retired persisted-query id as an unauthorized failure that says to update the SDK', async () => {
   const fetch: FetchLike = async () =>
     new Response(JSON.stringify({ error: 'persisted_query_rejected', message: `unknown persisted-query id: ${PLAN_STREAM.id}` }), { status: 403 });
   const client = new SpiderClient('https://x', 'k', { fetch });
@@ -233,7 +233,13 @@ test('planStream surfaces a retired persisted-query id as an update_required fai
   }
 
   assert.equal(events.length, 1);
-  assert.equal(events[0].type === 'failure' && events[0].error.code, 'update_required');
+  const ev = events[0];
+  assert.equal(ev.type, 'failure');
+  if (ev.type === 'failure') {
+    assert.equal(ev.error.code, 'unauthorized');
+    assert.equal(ev.error.serverCode, 'persisted_query_rejected');
+    assert.match(ev.error.message, /update the SDK/);
+  }
 });
 
 test('planStream surfaces a non-2xx response as a single failure event', async () => {
