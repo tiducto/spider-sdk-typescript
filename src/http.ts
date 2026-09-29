@@ -1,4 +1,4 @@
-import { CONTRACT_HEADER, CONTRACT_VERSION, checkContract } from './contract.ts';
+import { CONTRACT_HEADER, CONTRACT_VERSION } from './contract.ts';
 import { SDK_HEADER, SDK_IDENTITY } from './sdk.ts';
 import { DecodingError, TransportError, parseErrorEnvelope } from './errors.ts';
 
@@ -74,7 +74,6 @@ export class Transport {
       headers: this.contractHeaders({ 'content-type': 'application/json' }),
       body: JSON.stringify({ id: op.id, variables }),
     });
-    checkContract(res.headers.get(CONTRACT_HEADER));
     const text = await res.text();
     if (!res.ok) {
       const env = parseErrorEnvelope(text);
@@ -102,7 +101,6 @@ export class Transport {
       headers: this.contractHeaders({ 'content-type': 'application/json' }),
       body: JSON.stringify(body),
     });
-    checkContract(res.headers.get(CONTRACT_HEADER));
     const text = await res.text();
     if (!res.ok) {
       const env = parseErrorEnvelope(text);
@@ -124,9 +122,8 @@ export class Transport {
     headers.set('apikey', this.apiKey);
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), this.timeoutMs);
-    let res: Response;
     try {
-      res = await this.doFetch(`${this.baseUrl}/routing/${op.path}`, {
+      return await this.doFetch(`${this.baseUrl}/routing/${op.path}`, {
         method: 'POST',
         headers,
         body: JSON.stringify({ id: op.id, variables }),
@@ -135,8 +132,6 @@ export class Transport {
     } finally {
       clearTimeout(timer);
     }
-    checkContract(res.headers.get(CONTRACT_HEADER));
-    return res;
   }
 
   async getJson<D>(path: string, query?: Record<string, string>): Promise<D> {
@@ -157,7 +152,6 @@ export class Transport {
       }
     }
     const res = await this.send(url.toString(), { method: 'GET', headers: this.contractHeaders() });
-    checkContract(res.headers.get(CONTRACT_HEADER));
     return { ok: res.ok, status: res.status, text: await res.text() };
   }
 

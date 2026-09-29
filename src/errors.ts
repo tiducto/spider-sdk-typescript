@@ -2,6 +2,7 @@ export type SpiderErrorCode =
   | 'network'
   | 'timeout'
   | 'unauthorized'
+  | 'update_required'
   | 'bad_request'
   | 'not_found'
   | 'server'
@@ -22,17 +23,7 @@ export interface SpiderError {
   readonly cause?: unknown;
 }
 
-export class SpiderContractMismatchError extends Error {
-  readonly expected: string;
-  readonly actual: string;
-
-  constructor(expected: string, actual: string) {
-    super(`Spider contract mismatch: this SDK speaks ${expected} but the gateway declared ${actual}`);
-    this.name = 'SpiderContractMismatchError';
-    this.expected = expected;
-    this.actual = actual;
-  }
-}
+const PERSISTED_QUERY_REJECTED = 'persisted_query_rejected';
 
 export type TransportErrorKind = 'http' | 'no_data' | 'upstream' | 'bad_request';
 
@@ -61,8 +52,11 @@ export function parseErrorEnvelope(text: string): { code?: string; message?: str
   }
   if (typeof body === 'object' && body !== null) {
     const b = body as Record<string, unknown>;
+    // The gateway's own rejections carry their code in `error` (e.g. "persisted_query_rejected"); other
+    // services put a human sentence there, so only a code-shaped value counts.
+    const gatewayCode = typeof b.error === 'string' && /^[a-z][a-z0-9_]*$/.test(b.error) ? b.error : undefined;
     return {
-      code: typeof b.code === 'string' ? b.code : undefined,
+      code: typeof b.code === 'string' ? b.code : gatewayCode,
       message: typeof b.message === 'string' ? b.message : undefined,
     };
   }
@@ -93,6 +87,16 @@ export function toSpiderError(e: unknown): SpiderError {
   if (e instanceof TransportError) {
     if (e.kind === 'http') {
       const status = e.httpStatus ?? 0;
+      // The SDK only sends persisted-query ids from its own contract, so the gateway rejecting one means
+      // this SDK version's query has been retired.
+      if (status === 403 && e.serverCode === PERSISTED_QUERY_REJECTED) {
+        return {
+          code: 'update_required',
+          message: `The API no longer serves this SDK version's request; update the SDK (${e.message})`,
+          httpStatus: status,
+          serverCode: e.serverCode,
+        };
+      }
       const code: SpiderErrorCode =
         status === 401 || status === 403 ? 'unauthorized'
           : status === 404 ? 'not_found'

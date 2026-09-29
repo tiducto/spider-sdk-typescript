@@ -32,7 +32,7 @@ test('chunk maps itineraries with realtime delays', () => {
             end: { scheduledTime: '2026-07-15T08:30:00Z', estimated: { time: '2026-07-15T08:32:00Z', delay: 'PT120S' } },
             realtimeState: 'UPDATED',
             realTime: true,
-            serviceDate: '20260715',
+            serviceDate: '2026-07-15',
             from: { name: 'Origin', stop: { gtfsId: '1:A' } },
             to: { name: 'Dest', stop: { gtfsId: '1:B' } },
             route: { shortName: '12' },
@@ -58,7 +58,7 @@ test('chunk maps itineraries with realtime delays', () => {
   assert.equal(leg.startEstimated, '2026-07-15T08:01:00Z');
   assert.equal(leg.isRealtime, true);
   assert.equal(leg.realtimeState, 'UPDATED');
-  assert.equal(leg.serviceDate, '20260715');
+  assert.equal(leg.serviceDate, '2026-07-15');
   assert.equal(leg.fromName, 'Origin');
 });
 
@@ -73,6 +73,26 @@ test('pageInfo maps to the terminal done with continuation cursors', () => {
   assert.equal(event.pageInfo.hasNextPage, true);
   assert.equal(event.pageInfo.hasPreviousPage, false);
   assert.equal(event.pageInfo.searchWindowUsed, 'PT1H');
+  assert.deepEqual(event.routingErrors, []);
+});
+
+// A search that finds nothing reports why on the final pageInfo, shaped like batch planConnection's routingErrors.
+test('pageInfo routingErrors map onto done like the batch plan', () => {
+  const data = JSON.stringify({
+    hasNextPage: false,
+    hasPreviousPage: false,
+    routingErrors: [
+      { code: 'OUTSIDE_SERVICE_PERIOD', description: 'date is outside the feed', inputField: 'DATE_TIME' },
+      { code: 'LOCATION_NOT_FOUND', description: 'unknown stop' },
+    ],
+  });
+  const event = parsePlanStreamRecord('pageInfo', data);
+  assert.equal(event?.type, 'done');
+  if (event?.type !== 'done') return;
+  assert.deepEqual(event.routingErrors, [
+    { code: 'OUTSIDE_SERVICE_PERIOD', description: 'date is outside the feed', inputField: 'DATE_TIME' },
+    { code: 'LOCATION_NOT_FOUND', description: 'unknown stop', inputField: null },
+  ]);
 });
 
 // The wire `done` telemetry frame just ends the stream — it is dropped, not surfaced as an event.
@@ -187,6 +207,33 @@ test('planStreamPrevious continues backward from a done startCursor via before',
   assert.equal(body.variables.before, 'cursor-start');
   assert.equal(body.variables.after, undefined);
   assert.deepEqual(events.map((e) => e.type), ['done']);
+});
+
+// No SDK-side window: without maxWindowMinutes the router's own default cap applies.
+test('planStream with default options sends no maxWindow', async () => {
+  const mock = sseFetch(['event: pageInfo\ndata: {"hasNextPage":false,"hasPreviousPage":false}\n\n']);
+  const client = new SpiderClient('https://x', 'k', { fetch: mock.fetch });
+
+  for await (const ev of client.routing.planStream({ origin: Location.stop('1:A'), destination: Location.stop('1:B') })) {
+    void ev;
+  }
+
+  const body = JSON.parse(mock.calls[0].body);
+  assert.equal('maxWindow' in body.variables, false);
+});
+
+test('planStream surfaces a retired persisted-query id as an update_required failure', async () => {
+  const fetch: FetchLike = async () =>
+    new Response(JSON.stringify({ error: 'persisted_query_rejected', message: `unknown persisted-query id: ${PLAN_STREAM.id}` }), { status: 403 });
+  const client = new SpiderClient('https://x', 'k', { fetch });
+
+  const events: PlanStreamEvent[] = [];
+  for await (const ev of client.routing.planStream({ origin: Location.stop('1:A'), destination: Location.stop('1:B') })) {
+    events.push(ev);
+  }
+
+  assert.equal(events.length, 1);
+  assert.equal(events[0].type === 'failure' && events[0].error.code, 'update_required');
 });
 
 test('planStream surfaces a non-2xx response as a single failure event', async () => {

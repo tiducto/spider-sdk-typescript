@@ -1,7 +1,7 @@
 import type { Transport } from './http.ts';
 import type { SpiderResult } from './result.ts';
 import { failure, success } from './result.ts';
-import { SpiderContractMismatchError, toSpiderError } from './errors.ts';
+import { toSpiderError } from './errors.ts';
 
 export interface Stop {
   readonly gtfsId: string;
@@ -63,7 +63,6 @@ export class SpiderStops {
       const response = await this.transport.postJson<StopSearchResponseWire>('/stops/search', body, extractStopError);
       return success(response.hits.map(toStop));
     } catch (e) {
-      if (e instanceof SpiderContractMismatchError) throw e;
       return failure(toSpiderError(e));
     }
   }

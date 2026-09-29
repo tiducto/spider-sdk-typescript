@@ -2,11 +2,12 @@ import type { Transport } from './http.ts';
 import type { SpiderResult } from './result.ts';
 import { failure, success } from './result.ts';
 import type { SpiderError } from './errors.ts';
-import { DecodingError, SpiderContractMismatchError, TransportError, parseErrorEnvelope, toSpiderError } from './errors.ts';
+import { DecodingError, TransportError, parseErrorEnvelope, toSpiderError } from './errors.ts';
 import type { BikesAllowed, TransitMode, WheelchairBoarding } from './enums.ts';
 import { bikesAllowedFromWire, transitModeFromWire, wheelchairFromWire } from './enums.ts';
 import type { Location, ViaLocation } from './location.ts';
 import { decodePolyline } from './polyline.ts';
+import { invalidServiceDate, serviceDateOf } from './serviceDate.ts';
 import { DEPARTURES, PLAN, PLAN_STREAM, TRIP } from './persistedQueries.ts';
 import type {
   PlanConnectionData as PlanConnectionDataWire,
@@ -24,6 +25,7 @@ import type {
   StopDeparturesVariables,
   StopDeparturesStop as DeparturesStopWire,
   RealtimeState,
+  RoutingError as RoutingErrorWire,
   TransitMode as WireTransitMode,
   TripData as TripDataWire,
   TripVariables,
@@ -49,7 +51,7 @@ export interface Leg {
   readonly endDelaySeconds: number | null;
   readonly isRealtime: boolean;
   readonly realtimeState: RealtimeState | null;
-  /** GTFS service date this leg's trip runs on (`YYYYMMDD`) — pass to realtime `delays` lookups. */
+  /** GTFS service date this leg's trip runs on (ISO `YYYY-MM-DD`) — pass to realtime `delays` lookups. */
   readonly serviceDate: string | null;
   readonly fromName: string | null;
   readonly toName: string | null;
@@ -119,9 +121,11 @@ export type PlanStreamEvent =
        * (`startCursor`), gated on `hasNextPage` / `hasPreviousPage`. */
       readonly type: 'done';
       readonly pageInfo: RoutePageInfo;
+      /** Why the sweep found nothing, mirroring {@link Route.routingErrors}; empty when there is nothing to report. */
+      readonly routingErrors: readonly RoutingError[];
     }
   | {
-      /** Terminal failure — a transport/HTTP problem, a decoding error, or a server `error` event. */
+      /** Terminal failure — a transport/HTTP problem, a decoding error, or a server `error` event (`bad_request` for malformed input). */
       readonly type: 'failure';
       readonly error: SpiderError;
     };
@@ -133,6 +137,8 @@ export interface Departure {
   readonly realtimeState: RealtimeState | null;
   readonly headsign: string | null;
   readonly tripGtfsId: string | null;
+  /** GTFS service date the trip runs on (ISO `YYYY-MM-DD`) — pass it to {@link SpiderRouting.trip} and realtime `delays`. */
+  readonly serviceDate: string;
   readonly routeShortName: string | null;
   readonly routeLongName: string | null;
   readonly mode: TransitMode | null;
@@ -153,6 +159,8 @@ export interface TripStop {
 
 export interface TripDetails {
   readonly gtfsId: string;
+  /** GTFS service date of this trip instance (ISO `YYYY-MM-DD`); null when the trip has no stop times on it. */
+  readonly serviceDate: string | null;
   readonly routeShortName: string | null;
   readonly routeLongName: string | null;
   readonly mode: TransitMode | null;
@@ -198,7 +206,7 @@ export interface PlanStreamRequestOptions {
   readonly wheelchairAccessible?: boolean;
   /** Soft floor: the router keeps sweeping until at least this many itineraries are found (default 5). */
   readonly targetResults?: number;
-  /** Cap on how far forward the sweep searches, in minutes (default 360 = 6h). */
+  /** Cap on how far forward the sweep searches, in minutes. Undefined = the router's default cap. */
   readonly maxWindowMinutes?: number;
 }
 
@@ -209,7 +217,6 @@ export interface DeparturesOptions {
 
 const DEFAULT_SEARCH_WINDOW_MINUTES = 60;
 const DEFAULT_STREAM_TARGET_RESULTS = 5;
-const DEFAULT_MAX_WINDOW_MINUTES = 360;
 const DEFAULT_TIME_RANGE_SECONDS = 24 * 60 * 60;
 const INT_MAX = 2_147_483_647;
 
@@ -268,8 +275,8 @@ export class SpiderRouting {
    * as they finalize instead of one batched page. Lazy and cancellable: iteration opens the request, and
    * `break`ing out of the `for await` cancels the underlying stream. Each `result` event carries itineraries
    * with realtime delays already on their legs; a terminal `done` event then carries the continuation
-   * {@link RoutePageInfo} (or a terminal `failure`). Never throws for transport/HTTP/server errors — they
-   * surface as a `failure` event — except a contract-version mismatch, which throws like the batch calls.
+   * {@link RoutePageInfo} and any `routingErrors` (or a terminal `failure`). Never throws — transport, HTTP and
+   * request errors surface as a `failure` event.
    *
    * `targetResults` is a soft floor the sweep aims to reach; `maxWindowMinutes` caps how far forward it
    * searches. This opens a fresh stream; to continue, call {@link planStreamNext} with `done.pageInfo.endCursor`
@@ -308,7 +315,6 @@ export class SpiderRouting {
       : { kind: 'departAt', epochMs: toEpochMs(options.departAt ?? Date.now()) };
     const iso = new Date(time.epochMs).toISOString();
     const via = options.via ?? [];
-    const maxWindowMinutes = Math.max(1, Math.floor(options.maxWindowMinutes ?? DEFAULT_MAX_WINDOW_MINUTES));
     return {
       dateTime: time.kind === 'departAt' ? { earliestDeparture: iso } : { latestArrival: iso },
       origin: locationToInput(options.origin),
@@ -320,7 +326,7 @@ export class SpiderRouting {
         wheelchairAccessible: options.wheelchairAccessible ?? false,
       }),
       targetResults: options.targetResults ?? DEFAULT_STREAM_TARGET_RESULTS,
-      maxWindow: `PT${maxWindowMinutes}M`,
+      maxWindow: options.maxWindowMinutes != null ? `PT${Math.max(1, Math.floor(options.maxWindowMinutes))}M` : undefined,
       before: cursor?.before,
       after: cursor?.after,
     };
@@ -328,14 +334,13 @@ export class SpiderRouting {
 
   // Opens the SSE `plan-stream` request and turns its `chunk`/`pageInfo`/`done`/`error` records into a
   // PlanStreamEvent stream. A non-2xx response, a transport error, or a decoding slip becomes a terminal
-  // `failure` event rather than a throw (a contract mismatch still throws). Reading stops when the server
-  // closes the stream or the consumer stops iterating (which cancels the reader → aborts the request).
+  // `failure` event rather than a throw. Reading stops when the server closes the stream or the consumer
+  // stops iterating (which cancels the reader → aborts the request).
   private async *openPlanStream(variables: PlanConnectionStreamVariables): AsyncGenerator<PlanStreamEvent> {
     let response: Response;
     try {
       response = await this.transport.stream(PLAN_STREAM, variables);
     } catch (e) {
-      if (e instanceof SpiderContractMismatchError) throw e;
       yield { type: 'failure', error: toSpiderError(e) };
       return;
     }
@@ -411,12 +416,14 @@ export class SpiderRouting {
       }
       return success(mapDepartures(stop));
     } catch (e) {
-      if (e instanceof SpiderContractMismatchError) throw e;
       return failure(toSpiderError(e));
     }
   }
 
+  /** One trip on one service date (ISO `YYYY-MM-DD`, e.g. a {@link Departure.serviceDate}); undefined = today. */
   async trip(tripId: string, serviceDate?: string): Promise<SpiderResult<TripDetails>> {
+    const invalid = serviceDate != null ? invalidServiceDate(serviceDate) : null;
+    if (invalid != null) return failure(invalid);
     try {
       const variables: TripVariables = { id: tripId, serviceDate };
       const data = await this.transport.graphql<TripDataWire>(TRIP, variables);
@@ -426,7 +433,6 @@ export class SpiderRouting {
       }
       return success(mapTrip(trip));
     } catch (e) {
-      if (e instanceof SpiderContractMismatchError) throw e;
       return failure(toSpiderError(e));
     }
   }
@@ -439,7 +445,6 @@ export class SpiderRouting {
     try {
       return success(await this.fetchPlan(request, before, after));
     } catch (e) {
-      if (e instanceof SpiderContractMismatchError) throw e;
       return failure(toSpiderError(e));
     }
   }
@@ -479,11 +484,7 @@ export class SpiderRouting {
         hasPreviousPage: plan.pageInfo.hasPreviousPage,
         searchWindowUsed: plan.pageInfo.searchWindowUsed ?? null,
       },
-      routingErrors: plan.routingErrors.map((re) => ({
-        code: re.code,
-        description: re.description,
-        inputField: re.inputField ?? null,
-      })),
+      routingErrors: plan.routingErrors.map(mapRoutingError),
       searchDateTime: plan.searchDateTime ?? null,
     };
     return Object.assign({}, route, { [ROUTE_REQUEST]: request });
@@ -565,7 +566,7 @@ const SSE_DEFAULT_EVENT = 'message';
 // records the SDK doesn't surface (heartbeats, unknown events, the terminal `done` telemetry frame). A
 // malformed payload becomes a terminal `failure` rather than throwing. Exported so the wire-contract test
 // exercises it directly. A `chunk` frame → `result`; the `pageInfo` frame → terminal `done` (carrying the
-// RoutePageInfo); the wire `done` telemetry frame just ends the stream and is dropped.
+// RoutePageInfo and routingErrors); the wire `done` telemetry frame just ends the stream and is dropped.
 export function parsePlanStreamRecord(event: string, data: string): PlanStreamEvent | null {
   if (data.trim() === '') return null;
   switch (event) {
@@ -584,6 +585,7 @@ export function parsePlanStreamRecord(event: string, data: string): PlanStreamEv
           hasPreviousPage: page.hasPreviousPage ?? false,
           searchWindowUsed: page.searchWindowUsed ?? null,
         },
+        routingErrors: (page.routingErrors ?? []).map(mapRoutingError),
       }));
     case 'error':
       return { type: 'failure', error: streamErrorToSpiderError(data) };
@@ -656,11 +658,16 @@ interface StreamPageInfoWire {
   hasNextPage?: boolean;
   hasPreviousPage?: boolean;
   searchWindowUsed?: string | null;
+  routingErrors?: RoutingErrorWire[];
 }
 
 interface StreamGraphQLError {
   message: string;
   extensions?: { code?: string; field?: string } | null;
+}
+
+function mapRoutingError(re: RoutingErrorWire): RoutingError {
+  return { code: re.code, description: re.description, inputField: re.inputField ?? null };
 }
 
 function mapItinerary(node: ItineraryWire): Itinerary {
@@ -704,13 +711,11 @@ function mapLeg(leg: LegWire): Leg {
 }
 
 function mapDepartures(stop: DeparturesStopWire): Departure[] {
-  const stopName = stop.name.trim().toLowerCase();
   const out: Departure[] = [];
   for (const st of stop.stoptimesWithoutPatterns ?? []) {
     const serviceDay = st.serviceDay;
     const scheduledOffset = st.scheduledDeparture;
     if (serviceDay == null || scheduledOffset == null) continue;
-    if (st.headsign != null && st.headsign.trim().toLowerCase() === stopName) continue;
     const route = st.trip?.route;
     out.push({
       scheduledTimeEpochMs: (serviceDay + scheduledOffset) * 1000,
@@ -719,6 +724,7 @@ function mapDepartures(stop: DeparturesStopWire): Departure[] {
       realtimeState: st.realtimeState ?? null,
       headsign: st.headsign ?? null,
       tripGtfsId: st.trip?.gtfsId ?? null,
+      serviceDate: serviceDateOf(serviceDay),
       routeShortName: route?.shortName ?? null,
       routeLongName: route?.longName ?? null,
       mode: transitModeFromWire(route?.mode),
@@ -728,6 +734,7 @@ function mapDepartures(stop: DeparturesStopWire): Departure[] {
 }
 
 function mapTrip(trip: TripTripWire): TripDetails {
+  const serviceDay = trip.stoptimesForDate?.find((st) => st.serviceDay != null)?.serviceDay;
   const stops: TripStop[] = [];
   for (const st of trip.stoptimesForDate ?? []) {
     const s = st.stop;
@@ -750,6 +757,7 @@ function mapTrip(trip: TripTripWire): TripDetails {
   }
   return {
     gtfsId: trip.gtfsId,
+    serviceDate: serviceDay != null ? serviceDateOf(serviceDay) : null,
     routeShortName: trip.route.shortName ?? null,
     routeLongName: trip.route.longName ?? null,
     mode: transitModeFromWire(trip.route.mode),

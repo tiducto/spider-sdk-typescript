@@ -2,7 +2,6 @@ export { SpiderClient } from './client.ts';
 export type { SpiderClientOptions, FetchLike, FeatureOptions, AutoRetryOptions } from './http.ts';
 export type { SpiderResult } from './result.ts';
 export type { SpiderError, SpiderErrorCode } from './errors.ts';
-export { SpiderContractMismatchError } from './errors.ts';
 export { Location, ViaLocation } from './location.ts';
 export type { TransitMode, WheelchairBoarding, BikesAllowed, OccupancyStatus } from './enums.ts';
 export { SpiderRouting } from './routing.ts';

@@ -2,7 +2,8 @@ import type { Transport } from './http.ts';
 import { parseJson } from './http.ts';
 import type { SpiderResult } from './result.ts';
 import { failure, success } from './result.ts';
-import { SpiderContractMismatchError, TransportError, toSpiderError } from './errors.ts';
+import { TransportError, toSpiderError } from './errors.ts';
+import { invalidServiceDate } from './serviceDate.ts';
 import type { OccupancyStatus } from './enums.ts';
 import { occupancyFromWire } from './enums.ts';
 
@@ -127,7 +128,6 @@ export class SpiderRealtime {
         freshness: mapFreshness(dto),
       });
     } catch (e) {
-      if (e instanceof SpiderContractMismatchError) throw e;
       return failure(toSpiderError(e));
     }
   }
@@ -148,17 +148,17 @@ export class SpiderRealtime {
         freshness: mapFreshness(dto),
       });
     } catch (e) {
-      if (e instanceof SpiderContractMismatchError) throw e;
       return failure(toSpiderError(e));
     }
   }
 
   /**
    * Live delays, resolved per `(tripId, serviceDate)` instance: group trip ids by the GTFS service date
-   * (`YYYYMMDD`) they run on — pass each plan leg's `serviceDate` through. Empty input skips the call.
+   * (ISO `YYYY-MM-DD`) they run on — pass each plan leg's or departure's `serviceDate` through. Empty input
+   * skips the call; a malformed date fails as `bad_request` without a request.
    */
   async delays(byServiceDate: Readonly<Record<string, readonly string[]>>): Promise<SpiderResult<TripDelays>>;
-  /** Live delays for `tripIds` all on one `serviceDate` (`YYYYMMDD`) — the common single-day case. */
+  /** Live delays for `tripIds` all on one `serviceDate` (ISO `YYYY-MM-DD`) — the common single-day case. */
   async delays(tripIds: readonly string[], serviceDate: string): Promise<SpiderResult<TripDelays>>;
   async delays(
     arg: Readonly<Record<string, readonly string[]>> | readonly string[],
@@ -168,6 +168,10 @@ export class SpiderRealtime {
       ? { [serviceDate]: arg as readonly string[] }
       : arg as Readonly<Record<string, readonly string[]>>;
     const queries = Object.entries(byServiceDate).map(([date, tripIds]) => ({ serviceDate: date, tripIds: [...tripIds] }));
+    for (const q of queries) {
+      const invalid = invalidServiceDate(q.serviceDate);
+      if (invalid != null) return failure(invalid);
+    }
     if (queries.every((q) => q.tripIds.length === 0)) return success(EMPTY_DELAYS);
     try {
       const request: DelaysRequestWire = { queries };
@@ -177,7 +181,6 @@ export class SpiderRealtime {
         freshness: mapFreshness(dto),
       });
     } catch (e) {
-      if (e instanceof SpiderContractMismatchError) throw e;
       return failure(toSpiderError(e));
     }
   }
@@ -190,7 +193,6 @@ export class SpiderRealtime {
         freshness: mapFreshness(dto),
       });
     } catch (e) {
-      if (e instanceof SpiderContractMismatchError) throw e;
       return failure(toSpiderError(e));
     }
   }

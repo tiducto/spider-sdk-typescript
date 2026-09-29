@@ -49,40 +49,40 @@ test('delays posts grouped queries and maps per-service-date results', async () 
   const mock = mockFetch({
     json: {
       results: [
-        { serviceDate: '20260719', delays: [{ tripId: 't1', delaySeconds: 120, stopTimeUpdates: [] }], missing: ['t2'] },
+        { serviceDate: '2026-07-19', delays: [{ tripId: 't1', delaySeconds: 120, stopTimeUpdates: [] }], missing: ['t2'] },
       ],
       feedTimestamp: null,
       staleSeconds: null,
     },
   });
   const client = new SpiderClient('https://x', 'k', { fetch: mock.fetch });
-  const result = await client.realtime.delays(['t1', 't2'], '20260719');
+  const result = await client.realtime.delays(['t1', 't2'], '2026-07-19');
 
   const call = mock.calls[0];
   assert.equal(call.url, 'https://x/realtime/delays');
   assert.equal(call.method, 'POST');
-  assert.deepEqual(JSON.parse(call.body), { queries: [{ serviceDate: '20260719', tripIds: ['t1', 't2'] }] });
+  assert.deepEqual(JSON.parse(call.body), { queries: [{ serviceDate: '2026-07-19', tripIds: ['t1', 't2'] }] });
 
   if (!result.isSuccess) throw new Error(result.error.code);
   assert.equal(result.data.groups.length, 1);
   const group = result.data.groups[0];
-  assert.equal(group.serviceDate, '20260719');
+  assert.equal(group.serviceDate, '2026-07-19');
   assert.equal(group.delays[0].delaySeconds, 120);
   assert.deepEqual([...group.missing], ['t2']);
-  const hit = delayFor(result.data, 't1', '20260719');
+  const hit = delayFor(result.data, 't1', '2026-07-19');
   assert.equal(hit?.delaySeconds, 120);
-  assert.equal(delayFor(result.data, 't2', '20260719'), null);
+  assert.equal(delayFor(result.data, 't2', '2026-07-19'), null);
   assert.equal(result.data.freshness.feedTimestampEpochMs, null);
 });
 
 test('delays groups multiple service dates in one request', async () => {
   const mock = mockFetch({ json: { results: [] } });
   const client = new SpiderClient('https://x', 'k', { fetch: mock.fetch });
-  await client.realtime.delays({ '20260719': ['t1'], '20260720': ['t2', 't3'] });
+  await client.realtime.delays({ '2026-07-19': ['t1'], '2026-07-20': ['t2', 't3'] });
   assert.deepEqual(JSON.parse(mock.calls[0].body), {
     queries: [
-      { serviceDate: '20260719', tripIds: ['t1'] },
-      { serviceDate: '20260720', tripIds: ['t2', 't3'] },
+      { serviceDate: '2026-07-19', tripIds: ['t1'] },
+      { serviceDate: '2026-07-20', tripIds: ['t2', 't3'] },
     ],
   });
 });
@@ -90,10 +90,27 @@ test('delays groups multiple service dates in one request', async () => {
 test('delays with no trip ids skips the request', async () => {
   const mock = mockFetch({ json: {} });
   const client = new SpiderClient('https://x', 'k', { fetch: mock.fetch });
-  const result = await client.realtime.delays([], '20260719');
+  const result = await client.realtime.delays([], '2026-07-19');
   assert.equal(mock.calls.length, 0);
   if (!result.isSuccess) throw new Error(result.error.code);
   assert.equal(result.data.groups.length, 0);
+});
+
+test('delays rejects a malformed service date as bad_request without a request', async () => {
+  const mock = mockFetch({ json: {} });
+  const client = new SpiderClient('https://x', 'k', { fetch: mock.fetch });
+
+  const single = await client.realtime.delays(['t1'], '20260719');
+  const grouped = await client.realtime.delays({ '2026-07-19': ['t1'], '2026-02-30': ['t2'] });
+
+  assert.equal(mock.calls.length, 0);
+  for (const result of [single, grouped]) {
+    assert.equal(result.isSuccess, false);
+    if (!result.isSuccess) {
+      assert.equal(result.error.code, 'bad_request');
+      assert.equal(result.error.field, 'serviceDate');
+    }
+  }
 });
 
 test('alerts maps text and active periods', async () => {

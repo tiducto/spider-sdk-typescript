@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { Location, SpiderClient, SpiderContractMismatchError } from '../src/index.ts';
+import { Location, SpiderClient } from '../src/index.ts';
 import { CONTRACT_VERSION } from '../src/contract.ts';
 import { SDK_IDENTITY } from '../src/sdk.ts';
 import { PLAN } from '../src/persistedQueries.ts';
@@ -26,7 +26,7 @@ const PLAN_ENVELOPE = {
                 end: { scheduledTime: '2026-07-20T08:15:00Z', estimated: { time: '2026-07-20T08:16:00Z', delay: 'PT60S' } },
                 realtimeState: 'UPDATED',
                 realTime: true,
-                serviceDate: '20260720',
+                serviceDate: '2026-07-20',
                 from: { name: 'A', stop: { wheelchairBoarding: 'POSSIBLE' } },
                 to: { name: 'B', stop: { wheelchairBoarding: 'NOT_POSSIBLE' } },
                 route: { shortName: '1', longName: 'Line 1' },
@@ -95,7 +95,7 @@ test('plan posts the persisted query and maps the route', async () => {
   assert.equal(leg.startDelaySeconds, 120);
   assert.equal(leg.endDelaySeconds, 60);
   assert.equal(leg.startEstimated, '2026-07-20T08:02:00Z');
-  assert.equal(leg.serviceDate, '20260720');
+  assert.equal(leg.serviceDate, '2026-07-20');
   assert.equal(route.pageInfo.hasNextPage, true);
 });
 
@@ -112,7 +112,11 @@ test('plan with arriveBy sets latestArrival', async () => {
   assert.deepEqual(body.variables.origin, { location: { stopLocation: { stopLocationId: 'U1' } } });
 });
 
-test('departures maps stoptimes and drops sibling-terminating trips', async () => {
+// Europe/Prague service-day anchors (noon minus 12h, local): 2026-07-20 (CEST) and the 2026-10-25 DST change.
+const SERVICE_DAY_2026_07_20 = 1_784_498_400;
+const SERVICE_DAY_2026_10_25 = 1_792_882_800;
+
+test('departures maps stoptimes, keeps rows headed for the stop itself, and carries the service date', async () => {
   const mock = mockFetch({
     json: {
       data: {
@@ -149,12 +153,42 @@ test('departures maps stoptimes and drops sibling-terminating trips', async () =
   assert.equal(body.variables.numberOfDepartures, 5);
 
   if (!result.isSuccess) throw new Error(result.error.code);
-  assert.equal(result.data.length, 1);
+  // A headsign equal to the stop name is a real departure (e.g. a loop line), not a terminus row.
+  assert.deepEqual(result.data.map((d) => d.tripGtfsId), ['t1', 't2']);
   const d = result.data[0];
   assert.equal(d.scheduledTimeEpochMs, 1_060_000);
   assert.equal(d.realtimeTimeEpochMs, 1_090_000);
   assert.equal(d.routeShortName, '5');
   assert.equal(d.mode, 'BUS');
+  assert.equal(d.serviceDate, '1970-01-01');
+});
+
+test('departure serviceDate is the trip\'s service day, across midnight and DST', async () => {
+  const mock = mockFetch({
+    json: {
+      data: {
+        asStop: null,
+        asStation: {
+          gtfsId: 'S1',
+          name: 'Station',
+          stoptimesWithoutPatterns: [
+            // 00:40 on 21 July, still on the 20 July service day.
+            { serviceDay: SERVICE_DAY_2026_07_20, scheduledDeparture: 24 * 3600 + 40 * 60, trip: { gtfsId: 'night' } },
+            // 25 October is a 25-hour day; its anchor is 23:00Z the day before.
+            { serviceDay: SERVICE_DAY_2026_10_25, scheduledDeparture: 8 * 3600, trip: { gtfsId: 'dst' } },
+          ],
+        },
+      },
+    },
+  });
+  const client = new SpiderClient('https://x', 'k', { fetch: mock.fetch });
+  const result = await client.routing.departures('S1');
+
+  if (!result.isSuccess) throw new Error(result.error.code);
+  const [night, dst] = result.data;
+  assert.equal(new Date(night.scheduledTimeEpochMs).toISOString(), '2026-07-20T22:40:00.000Z');
+  assert.equal(night.serviceDate, '2026-07-20');
+  assert.equal(dst.serviceDate, '2026-10-25');
 });
 
 test('trip maps stops, geometry and enums', async () => {
@@ -169,7 +203,7 @@ test('trip maps stops, geometry and enums', async () => {
           bikesAllowed: 'ALLOWED',
           stoptimesForDate: [
             {
-              serviceDay: 1000,
+              serviceDay: SERVICE_DAY_2026_07_20,
               scheduledArrival: 60,
               scheduledDeparture: 65,
               realtime: false,
@@ -182,18 +216,45 @@ test('trip maps stops, geometry and enums', async () => {
     },
   });
   const client = new SpiderClient('https://x', 'k', { fetch: mock.fetch });
-  const result = await client.routing.trip('t1');
+  const result = await client.routing.trip('t1', '2026-07-20');
 
+  assert.equal(JSON.parse(mock.calls[0].body).variables.serviceDate, '2026-07-20');
   if (!result.isSuccess) throw new Error(result.error.code);
   const trip = result.data;
   assert.equal(trip.gtfsId, 't1');
+  assert.equal(trip.serviceDate, '2026-07-20');
   assert.equal(trip.mode, 'BUS');
   assert.equal(trip.bikesAllowed, 'Allowed');
   assert.equal(trip.stops.length, 1);
   assert.equal(trip.stops[0].name, 'Stop 1');
-  assert.equal(trip.stops[0].scheduledArrivalEpochMs, 1_060_000);
+  assert.equal(trip.stops[0].scheduledArrivalEpochMs, (SERVICE_DAY_2026_07_20 + 60) * 1000);
   assert.equal(trip.stops[0].wheelchairBoarding, 'Possible');
   assert.equal(trip.geometry.length, 1);
+});
+
+test('trip rejects a malformed service date as bad_request without a request', async () => {
+  const mock = mockFetch({ json: {} });
+  const client = new SpiderClient('https://x', 'k', { fetch: mock.fetch });
+
+  for (const serviceDate of ['20260720', '2026-02-30', '2026-7-20', '']) {
+    const result = await client.routing.trip('t1', serviceDate);
+    assert.equal(result.isSuccess, false, serviceDate);
+    if (!result.isSuccess) {
+      assert.equal(result.error.code, 'bad_request');
+      assert.equal(result.error.field, 'serviceDate');
+    }
+  }
+  assert.equal(mock.calls.length, 0);
+});
+
+test('trip on a date it does not run has no service date', async () => {
+  const mock = mockFetch({ json: { data: { trip: { gtfsId: 't1', route: { mode: 'BUS' }, stoptimesForDate: [] } } } });
+  const client = new SpiderClient('https://x', 'k', { fetch: mock.fetch });
+  const result = await client.routing.trip('t1', '2026-07-20');
+
+  if (!result.isSuccess) throw new Error(result.error.code);
+  assert.equal(result.data.serviceDate, null);
+  assert.equal(result.data.stops.length, 0);
 });
 
 test('an HTTP error becomes a failure result', async () => {
@@ -243,15 +304,28 @@ test('a top-level BAD_REQUEST error becomes a bad_request failure with field + m
   }
 });
 
-test('a contract-version mismatch throws instead of returning a result', async () => {
-  // A different MAJOR than the SDK's contract — always a genuine mismatch, whatever the current version.
+test('a gateway declaring another contract major is not an error', async () => {
   const otherMajor = `${Number(CONTRACT_VERSION.split('.')[0]) + 1}.0.0`;
   const mock = mockFetch({ json: PLAN_ENVELOPE, headers: { 'x-spider-contract-version': otherMajor } });
   const client = new SpiderClient('https://x', 'k', { fetch: mock.fetch });
-  await assert.rejects(
-    client.routing.plan({ origin: Location.coordinate(1, 2), destination: Location.coordinate(3, 4) }),
-    (err) => err instanceof SpiderContractMismatchError,
-  );
+  const result = await client.routing.plan({ origin: Location.coordinate(1, 2), destination: Location.coordinate(3, 4) });
+  assert.equal(result.isSuccess, true);
+});
+
+test('a retired persisted-query id becomes an update_required failure', async () => {
+  const mock = mockFetch({
+    status: 403,
+    json: { error: 'persisted_query_rejected', message: `unknown persisted-query id: ${PLAN.id}` },
+  });
+  const client = new SpiderClient('https://x', 'k', { fetch: mock.fetch });
+  const result = await client.routing.plan({ origin: Location.coordinate(1, 2), destination: Location.coordinate(3, 4) });
+  assert.equal(result.isSuccess, false);
+  if (!result.isSuccess) {
+    assert.equal(result.error.code, 'update_required');
+    assert.equal(result.error.httpStatus, 403);
+    assert.equal(result.error.serverCode, 'persisted_query_rejected');
+    assert.match(result.error.message, /update the SDK/);
+  }
 });
 
 test('plan maps modes, transfers, wheelchair, and search window to OTP inputs', async () => {

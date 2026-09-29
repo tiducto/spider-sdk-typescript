@@ -215,11 +215,14 @@ export async function planWithErrorHandling(client: SpiderClient) {
     return
   }
 
-  // No exceptions on failure — branch on `result.error.code`, a `SpiderErrorCode` (one of these nine literals).
-  // The `never` in the default makes this switch exhaustive: if a new code is added, this stops compiling.
+  // No exceptions on failure — branch on `result.error.code`, a `SpiderErrorCode`. New codes can arrive in a
+  // minor release, so keep a default branch.
   switch (result.error.code) {
     case 'unauthorized':
       console.error('Bad or missing apikey — it is scoped to one project + environment')
+      break
+    case 'update_required':
+      console.error('This app version is too old for the API — prompt the user to update')
       break
     case 'bad_request':
       // A server validation failure: over-cap searchWindow, bad via, or a missing required field.
@@ -244,12 +247,8 @@ export async function planWithErrorHandling(client: SpiderClient) {
       console.error('The response did not match the expected shape:', result.error.message)
       break
     case 'unknown':
+    default:
       console.error('Unexpected error:', result.error.message)
-      break
-    default: {
-      const unhandled: never = result.error.code
-      throw new Error(`Unhandled error code: ${String(unhandled)}`)
-    }
   }
 }
 
