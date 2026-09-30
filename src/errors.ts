@@ -1,7 +1,9 @@
 /**
  * What went wrong. `bad_request` is an invalid or missing input, caught by the SDK before sending or
  * rejected by the server; `field` names it. `query_retired` means the API no longer serves the persisted
- * query behind the call (HTTP 410 Gone).
+ * query behind the call (HTTP 410 Gone). `search_limit_reached` means the project has used the trip-planning
+ * searches its plan includes; it applies to trip planning only. `agreement_inactive` means the project has no
+ * active agreement; it applies to every call made with a client key.
  */
 export type SpiderErrorCode =
   | 'network'
@@ -10,6 +12,8 @@ export type SpiderErrorCode =
   | 'bad_request'
   | 'not_found'
   | 'query_retired'
+  | 'search_limit_reached'
+  | 'agreement_inactive'
   | 'server'
   | 'rate_limited'
   | 'decoding'
@@ -30,6 +34,8 @@ export interface SpiderError {
 }
 
 const QUERY_RETIRED = 'query_retired';
+const SEARCH_LIMIT_REACHED = 'search_limit_reached';
+const AGREEMENT_INACTIVE = 'agreement_inactive';
 
 /** A `bad_request` that names only the field, like the server's own validation errors. */
 export function badRequest(
@@ -112,6 +118,13 @@ export function toSpiderError(e: unknown): SpiderError {
   if (e instanceof TransportError) {
     if (e.kind === 'http') {
       const status = e.httpStatus ?? 0;
+      // The body code decides whatever the status, since a proxy may rewrite it; these two have no status fallback.
+      if (e.serverCode === SEARCH_LIMIT_REACHED) {
+        return { code: 'search_limit_reached', message: 'search limit reached', httpStatus: status, serverCode: e.serverCode };
+      }
+      if (e.serverCode === AGREEMENT_INACTIVE) {
+        return { code: 'agreement_inactive', message: 'agreement is not active', httpStatus: status, serverCode: e.serverCode };
+      }
       if (e.serverCode === QUERY_RETIRED || status === 410) {
         return { code: 'query_retired', message: 'persisted query is retired', httpStatus: status, serverCode: e.serverCode };
       }

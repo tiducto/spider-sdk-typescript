@@ -57,6 +57,37 @@ test('a query_retired body is query_retired with a message that states the state
   assert.equal(toSpiderError(httpFailure('routing plan', 410, '')).code, 'query_retired');
 });
 
+for (const [code, message] of [
+  ['search_limit_reached', 'search limit reached'],
+  ['agreement_inactive', 'agreement is not active'],
+] as const) {
+  test(`a 403 ${code} body is ${code} with the body message`, () => {
+    const err = toSpiderError(httpFailure('routing plan', 403, JSON.stringify({ error: code, message })));
+    assert.equal(err.code, code);
+    assert.equal(err.httpStatus, 403);
+    assert.equal(err.serverCode, code);
+    assert.equal(err.message, message);
+  });
+
+  test(`the ${code} body code wins over a rewritten status`, () => {
+    for (const status of [400, 401, 404, 410, 429, 500, 502]) {
+      const err = toSpiderError(httpFailure('GET /realtime/alerts', status, JSON.stringify({ error: code, message })));
+      assert.equal(err.code, code, `status ${status}`);
+      assert.equal(err.httpStatus, status);
+      assert.equal(err.message, message);
+    }
+  });
+}
+
+test('a 403 without a plan-limit code stays unauthorized', () => {
+  for (const text of ['', 'Forbidden', '{"message":"Access denied"}', '{"error":"Access to this API has been disallowed"}']) {
+    const err = toSpiderError(httpFailure('routing plan', 403, text));
+    assert.equal(err.code, 'unauthorized', JSON.stringify(text));
+    assert.equal(err.httpStatus, 403);
+    assert.equal(err.serverCode, undefined);
+  }
+});
+
 test('a 403 persisted_query_rejected stays unauthorized with the gateway message', () => {
   const unknown = toSpiderError(httpFailure('routing plan', 403, '{"error":"persisted_query_rejected","message":"unknown persisted-query id: x"}'));
   assert.equal(unknown.code, 'unauthorized');

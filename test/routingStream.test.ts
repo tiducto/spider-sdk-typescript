@@ -297,6 +297,34 @@ test('planStream surfaces a retired persisted query as a query_retired failure',
   }
 });
 
+test('planStream surfaces a plan-limit 403 before the stream starts as a single failure with its code', async () => {
+  for (const [code, message] of [
+    ['search_limit_reached', 'search limit reached'],
+    ['agreement_inactive', 'agreement is not active'],
+  ] as const) {
+    const fetch: FetchLike = async () =>
+      new Response(JSON.stringify({ error: code, message }), { status: 403, headers: { 'content-type': 'application/json' } });
+    const client = new SpiderClient('https://x', 'k', { fetch });
+
+    for (const stream of [
+      client.routing.planStream(STREAM_OPTIONS),
+      client.routing.planStreamNext(STREAM_OPTIONS, 'cursor'),
+    ]) {
+      const events = await collect(stream);
+
+      assert.equal(events.length, 1);
+      const ev = events[0];
+      assert.equal(ev.type, 'failure');
+      if (ev.type === 'failure') {
+        assert.equal(ev.error.code, code);
+        assert.equal(ev.error.httpStatus, 403);
+        assert.equal(ev.error.serverCode, code);
+        assert.equal(ev.error.message, message);
+      }
+    }
+  }
+});
+
 test('planStream surfaces a non-2xx response as a single failure event', async () => {
   const fetch: FetchLike = async () => new Response('forbidden', { status: 403 });
   const client = new SpiderClient('https://x', 'k', { fetch });
