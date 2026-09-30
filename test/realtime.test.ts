@@ -45,6 +45,30 @@ test('vehicleForTrip treats 404 as no vehicle reporting', async () => {
   assert.equal(result.data.vehicle, null);
 });
 
+test('vehicleForTrip fails a 404 whose body names a plan limit, and a plain 404 stays no vehicle', async () => {
+  for (const [code, message] of [
+    ['planning_limit_reached', 'trip planning limit reached'],
+    ['agreement_inactive', 'agreement is not active'],
+  ] as const) {
+    const mock = mockFetch({ status: 404, json: { error: code, message } });
+    const client = new SpiderClient('https://x', 'k', { fetch: mock.fetch });
+    const result = await client.realtime.vehicleForTrip('t1');
+    assert.equal(result.isSuccess, false, code);
+    if (!result.isSuccess) {
+      assert.equal(result.error.code, code);
+      assert.equal(result.error.httpStatus, 404);
+      assert.equal(result.error.serverCode, code);
+      assert.equal(result.error.message, message);
+    }
+  }
+  for (const reply of [{ status: 404, text: '' }, { status: 404, json: { error: 'not_found', message: 'no vehicle' } }]) {
+    const client = new SpiderClient('https://x', 'k', { fetch: mockFetch(reply).fetch });
+    const result = await client.realtime.vehicleForTrip('t1');
+    if (!result.isSuccess) throw new Error(result.error.code);
+    assert.equal(result.data.vehicle, null);
+  }
+});
+
 test('delays posts grouped queries and maps per-service-date results', async () => {
   const mock = mockFetch({
     json: {
