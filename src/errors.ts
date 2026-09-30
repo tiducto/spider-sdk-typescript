@@ -58,6 +58,8 @@ export class TransportError extends Error {
   readonly field: string | undefined;
   /** The response body's own `message`, when it has one. */
   readonly serverMessage: string | undefined;
+  /** The code-shaped `error` field of the response body, where the gateway puts its own refusal codes. */
+  readonly gatewayCode: string | undefined;
 
   constructor(
     kind: TransportErrorKind,
@@ -65,7 +67,7 @@ export class TransportError extends Error {
     httpStatus?: number,
     serverCode?: string,
     field?: string,
-    serverMessage?: string,
+    body?: { readonly message?: string; readonly gatewayCode?: string },
   ) {
     super(message);
     this.name = 'TransportError';
@@ -73,11 +75,12 @@ export class TransportError extends Error {
     this.httpStatus = httpStatus;
     this.serverCode = serverCode;
     this.field = field;
-    this.serverMessage = serverMessage;
+    this.serverMessage = body?.message;
+    this.gatewayCode = body?.gatewayCode;
   }
 }
 
-export function parseErrorEnvelope(text: string): { code?: string; message?: string } {
+export function parseErrorEnvelope(text: string): { code?: string; message?: string; gatewayCode?: string } {
   let body: unknown;
   try {
     body = JSON.parse(text);
@@ -92,6 +95,7 @@ export function parseErrorEnvelope(text: string): { code?: string; message?: str
     return {
       code: typeof b.code === 'string' ? b.code : gatewayCode,
       message: typeof b.message === 'string' ? b.message : undefined,
+      gatewayCode,
     };
   }
   return {};
@@ -105,16 +109,16 @@ export function httpFailure(where: string, status: number, text: string, detail?
   const env = parseErrorEnvelope(text);
   const message = (detail ?? env.message ?? text.slice(0, 300)).trim();
   const field = status === 400 ? FIELD_PROBLEM.exec(message)?.[1] : undefined;
-  return new TransportError('http', `${where} -> ${status}: ${message}`, status, env.code, field, env.message);
+  return new TransportError('http', `${where} -> ${status}: ${message}`, status, env.code, field, env);
 }
 
 /**
- * The plan-limit error an `http` failure's body code names (`planning_limit_reached`, `agreement_inactive`),
- * whatever its status, or `undefined` when the body names neither.
+ * The plan-limit error an `http` failure's body `error` field names (`planning_limit_reached`,
+ * `agreement_inactive`), whatever its status, or `undefined` when it names neither. A `code` field is not read.
  */
 export function limitRefusal(e: TransportError): SpiderError | undefined {
-  if (e.kind !== 'http' || e.serverCode == null || !Object.hasOwn(LIMIT_MESSAGES, e.serverCode)) return undefined;
-  const code = e.serverCode as LimitCode;
+  if (e.kind !== 'http' || e.gatewayCode == null || !Object.hasOwn(LIMIT_MESSAGES, e.gatewayCode)) return undefined;
+  const code = e.gatewayCode as LimitCode;
   return { code, message: e.serverMessage?.trim() || LIMIT_MESSAGES[code], httpStatus: e.httpStatus, serverCode: code };
 }
 

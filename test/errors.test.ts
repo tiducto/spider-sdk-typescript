@@ -33,17 +33,20 @@ test('surfaces the server error code from the envelope', () => {
 });
 
 test('parseErrorEnvelope extracts code and message, tolerates non-JSON', () => {
-  assert.deepEqual(parseErrorEnvelope('{"code":"forbidden","message":"nope"}'), { code: 'forbidden', message: 'nope' });
+  assert.deepEqual(parseErrorEnvelope('{"code":"forbidden","message":"nope"}'), { code: 'forbidden', message: 'nope', gatewayCode: undefined });
   assert.deepEqual(parseErrorEnvelope('plain text'), {});
-  assert.deepEqual(parseErrorEnvelope('{"message":"only msg"}'), { code: undefined, message: 'only msg' });
+  assert.deepEqual(parseErrorEnvelope('{"message":"only msg"}'), { code: undefined, message: 'only msg', gatewayCode: undefined });
 });
 
 test('parseErrorEnvelope takes a code-shaped gateway `error` as the code, but not a sentence', () => {
   assert.deepEqual(
     parseErrorEnvelope('{"error":"persisted_query_rejected","message":"unknown persisted-query id: x"}'),
-    { code: 'persisted_query_rejected', message: 'unknown persisted-query id: x' },
+    { code: 'persisted_query_rejected', message: 'unknown persisted-query id: x', gatewayCode: 'persisted_query_rejected' },
   );
-  assert.deepEqual(parseErrorEnvelope('{"error":"Access to this API has been disallowed"}'), { code: undefined, message: undefined });
+  assert.deepEqual(
+    parseErrorEnvelope('{"error":"Access to this API has been disallowed"}'),
+    { code: undefined, message: undefined, gatewayCode: undefined },
+  );
 });
 
 test('a query_retired body is query_retired with a message that states the state', () => {
@@ -88,6 +91,17 @@ test('a plan-limit error takes the body message, and the fixed wording only when
   assert.equal(inactive.message, 'agreement expired');
   assert.equal(toSpiderError(httpFailure('routing plan', 403, '{"error":"planning_limit_reached"}')).message, 'trip planning limit reached');
   assert.equal(toSpiderError(httpFailure('routing plan', 403, '{"error":"agreement_inactive","message":""}')).message, 'agreement is not active');
+});
+
+test('a plan-limit code is read from the body `error` field only, never from `code`', () => {
+  const both = toSpiderError(httpFailure('routing plan', 403, '{"error":"agreement_inactive","code":"x"}'));
+  assert.equal(both.code, 'agreement_inactive');
+  assert.equal(both.serverCode, 'agreement_inactive');
+  assert.equal(both.message, 'agreement is not active');
+  const codeOnly = toSpiderError(httpFailure('routing plan', 403, '{"code":"agreement_inactive"}'));
+  assert.equal(codeOnly.code, 'unauthorized');
+  assert.equal(codeOnly.httpStatus, 403);
+  assert.equal(toSpiderError(httpFailure('routing plan', 403, '{"code":"planning_limit_reached"}')).code, 'unauthorized');
 });
 
 test('a 403 without a plan-limit code stays unauthorized', () => {
