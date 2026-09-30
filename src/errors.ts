@@ -78,7 +78,7 @@ export function parseErrorEnvelope(text: string): { code?: string; message?: str
 }
 
 // The fixed wording of the gateway's and services' own 400s, e.g. "limit is out of range".
-const FIELD_PROBLEM = /^([A-Za-z_]\w*) (?:is required|is out of range|is invalid|is not allowed|must be an integer)$/;
+const FIELD_PROBLEM = /^([A-Za-z_]\w*) (?:is required|is out of range|is invalid)$/;
 
 /** A non-2xx response → an `http` TransportError carrying the body's error code, and for a 400 the field it names. */
 export function httpFailure(where: string, status: number, text: string, detail?: string): TransportError {

@@ -76,5 +76,7 @@ test('a 400 naming a field is bad_request with that field, from a JSON envelope 
   const search = toSpiderError(httpFailure('POST /stops/search', 400, '{"message":"Attribute `name` is not filterable."}'));
   assert.equal(search.code, 'bad_request');
   assert.equal(search.field, undefined);
+  assert.equal(toSpiderError(httpFailure('POST /stops/search', 400, '{"message":"hitsPerPage is not allowed"}')).field, undefined);
+  assert.equal(toSpiderError(httpFailure('POST /stops/search', 400, '{"message":"limit is invalid"}')).field, 'limit');
   assert.equal(toSpiderError(httpFailure('GET /x', 404, 'limit is out of range')).field, undefined);
 });
