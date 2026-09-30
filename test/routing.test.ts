@@ -27,9 +27,9 @@ const PLAN_ENVELOPE = {
                 realtimeState: 'UPDATED',
                 realTime: true,
                 serviceDate: '2026-07-20',
-                from: { name: 'A', stop: { wheelchairBoarding: 'POSSIBLE' } },
-                to: { name: 'B', stop: { wheelchairBoarding: 'NOT_POSSIBLE' } },
-                route: { shortName: '1', longName: 'Line 1' },
+                from: { name: 'A', stop: { gtfsId: '1:A', wheelchairBoarding: 'POSSIBLE', platformCode: '2', zoneId: '100' } },
+                to: { name: 'B', stop: { gtfsId: '1:B', wheelchairBoarding: 'NOT_POSSIBLE', platformCode: 'B', zoneId: '101' } },
+                route: { gtfsId: '1:L1', shortName: '1', longName: 'Line 1', color: 'FF0000', textColor: 'FFFFFF' },
                 headsign: 'Center',
                 distance: 1200.5,
                 duration: 900,
@@ -85,9 +85,18 @@ test('plan posts the persisted query and maps the route', async () => {
   assert.equal(leg.distanceMeters, 1200.5);
   assert.equal(leg.durationSeconds, 900);
   assert.equal(leg.tripGtfsId, '1:trip');
-  assert.equal(leg.bikesAllowed, 'Allowed');
-  assert.equal(leg.fromWheelchair, 'Possible');
-  assert.equal(leg.toWheelchair, 'NotPossible');
+  assert.equal(leg.bikesAllowed, 'ALLOWED');
+  assert.equal(leg.fromWheelchair, 'POSSIBLE');
+  assert.equal(leg.toWheelchair, 'NOT_POSSIBLE');
+  assert.equal(leg.fromGtfsId, '1:A');
+  assert.equal(leg.toGtfsId, '1:B');
+  assert.equal(leg.fromPlatformCode, '2');
+  assert.equal(leg.toPlatformCode, 'B');
+  assert.equal(leg.fromZoneId, '100');
+  assert.equal(leg.toZoneId, '101');
+  assert.equal(leg.routeGtfsId, '1:L1');
+  assert.equal(leg.routeColor, 'FF0000');
+  assert.equal(leg.routeTextColor, 'FFFFFF');
   assert.ok(leg.geometry.length > 0);
   // Realtime delays ride the shared wire→domain mapper, so the one-shot plan surfaces them too.
   assert.equal(leg.isRealtime, true);
@@ -131,7 +140,12 @@ test('departures maps stoptimes, keeps rows headed for the stop itself, and carr
               realtime: true,
               realtimeState: 'UPDATED',
               headsign: 'Center',
-              trip: { gtfsId: 't1', route: { shortName: '5', longName: 'Line 5', mode: 'BUS' } },
+              stop: { gtfsId: 'U1Z2', platformCode: '2' },
+              trip: {
+                gtfsId: 't1',
+                wheelchairAccessible: 'POSSIBLE',
+                route: { gtfsId: '1:L5', shortName: '5', longName: 'Line 5', mode: 'BUS', color: '00A0E0', textColor: '000000' },
+              },
             },
             {
               serviceDay: 1000,
@@ -162,6 +176,18 @@ test('departures maps stoptimes, keeps rows headed for the stop itself, and carr
   assert.equal(d.routeShortName, '5');
   assert.equal(d.mode, 'BUS');
   assert.equal(d.serviceDate, '1970-01-01');
+  assert.equal(d.routeGtfsId, '1:L5');
+  assert.equal(d.routeColor, '00A0E0');
+  assert.equal(d.routeTextColor, '000000');
+  assert.equal(d.stopGtfsId, 'U1Z2');
+  assert.equal(d.platformCode, '2');
+  assert.equal(d.wheelchairAccessible, 'POSSIBLE');
+  // Display fields the wire leaves out are null.
+  const bare = result.data[1];
+  assert.equal(bare.routeColor, null);
+  assert.equal(bare.stopGtfsId, null);
+  assert.equal(bare.platformCode, null);
+  assert.equal(bare.wheelchairAccessible, null);
 });
 
 test('departure serviceDate is the trip\'s service day, across midnight and DST', async () => {
@@ -198,17 +224,18 @@ test('trip maps stops, geometry and enums', async () => {
       data: {
         trip: {
           gtfsId: 't1',
-          route: { shortName: '5', longName: 'Line 5', mode: 'BUS' },
+          route: { gtfsId: '1:L5', shortName: '5', longName: 'Line 5', mode: 'BUS', color: '00A0E0', textColor: '000000' },
           directionId: '0',
           tripHeadsign: 'Center',
           bikesAllowed: 'ALLOWED',
+          wheelchairAccessible: 'NOT_POSSIBLE',
           stoptimesForDate: [
             {
               serviceDay: SERVICE_DAY_2026_07_20,
               scheduledArrival: 60,
               scheduledDeparture: 65,
               realtime: false,
-              stop: { gtfsId: 's1', name: 'Stop 1', lat: 49.1, lon: 16.6, wheelchairBoarding: 'POSSIBLE' },
+              stop: { gtfsId: 's1', name: 'Stop 1', lat: 49.1, lon: 16.6, wheelchairBoarding: 'POSSIBLE', platformCode: 'A', zoneId: '100' },
             },
           ],
           tripGeometry: { points: '_p~iF~ps|U', length: 1 },
@@ -225,11 +252,17 @@ test('trip maps stops, geometry and enums', async () => {
   assert.equal(trip.gtfsId, 't1');
   assert.equal(trip.serviceDate, '2026-07-20');
   assert.equal(trip.mode, 'BUS');
-  assert.equal(trip.bikesAllowed, 'Allowed');
+  assert.equal(trip.bikesAllowed, 'ALLOWED');
+  assert.equal(trip.wheelchairAccessible, 'NOT_POSSIBLE');
+  assert.equal(trip.routeGtfsId, '1:L5');
+  assert.equal(trip.routeColor, '00A0E0');
+  assert.equal(trip.routeTextColor, '000000');
+  assert.equal(trip.stops[0].platformCode, 'A');
+  assert.equal(trip.stops[0].zoneId, '100');
   assert.equal(trip.stops.length, 1);
   assert.equal(trip.stops[0].name, 'Stop 1');
   assert.equal(trip.stops[0].scheduledArrivalEpochMs, (SERVICE_DAY_2026_07_20 + 60) * 1000);
-  assert.equal(trip.stops[0].wheelchairBoarding, 'Possible');
+  assert.equal(trip.stops[0].wheelchairBoarding, 'POSSIBLE');
   assert.equal(trip.geometry.length, 1);
 });
 
@@ -256,6 +289,9 @@ test('trip on a date it does not run has no service date', async () => {
   if (!result.isSuccess) throw new Error(result.error.code);
   assert.equal(result.data.serviceDate, null);
   assert.equal(result.data.stops.length, 0);
+  assert.equal(result.data.routeGtfsId, null);
+  assert.equal(result.data.routeColor, null);
+  assert.equal(result.data.wheelchairAccessible, null);
 });
 
 test('an HTTP error becomes a failure result', async () => {

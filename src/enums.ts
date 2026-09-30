@@ -27,9 +27,9 @@ export type TransitMode =
   | 'WALK'
   | 'UNKNOWN';
 
-export type WheelchairBoarding = 'Possible' | 'NotPossible' | 'UNKNOWN';
+export type WheelchairBoarding = 'POSSIBLE' | 'NOT_POSSIBLE' | 'UNKNOWN';
 
-export type BikesAllowed = 'Allowed' | 'NotAllowed' | 'UNKNOWN';
+export type BikesAllowed = 'ALLOWED' | 'NOT_ALLOWED' | 'UNKNOWN';
 
 export type OccupancyStatus =
   | 'EMPTY'
@@ -69,6 +69,10 @@ const OCCUPANCY_STATUSES: Known<OccupancyStatus> = {
   CRUSHED_STANDING_ROOM_ONLY: true, FULL: true, NOT_ACCEPTING_PASSENGERS: true, NOT_BOARDABLE: true,
 };
 
+const WHEELCHAIR_BOARDING: Known<WheelchairBoarding> = { POSSIBLE: true, NOT_POSSIBLE: true };
+
+const BIKES_ALLOWED: Known<BikesAllowed> = { ALLOWED: true, NOT_ALLOWED: true };
+
 const REALTIME_STATES: Known<RealtimeState> = { ADDED: true, CANCELED: true, MODIFIED: true, SCHEDULED: true, UPDATED: true };
 
 const ROUTING_ERROR_CODES: Known<RoutingErrorCode> = {
@@ -100,17 +104,17 @@ export function inputFieldFromWire(raw: string | null | undefined): InputField |
 }
 
 export function wheelchairFromWire(raw: string | null | undefined): WheelchairBoarding | null {
-  if (raw == null || raw === 'NO_INFORMATION') return null;
-  if (raw === 'POSSIBLE') return 'Possible';
-  if (raw === 'NOT_POSSIBLE') return 'NotPossible';
-  return 'UNKNOWN';
+  return raw == null || raw === 'NO_INFORMATION' ? null : decode(WHEELCHAIR_BOARDING, raw);
+}
+
+/** GTFS `wheelchair_boarding` as the stop-search index carries it: 1 possible, 2 not possible, 0 no information. */
+export function wheelchairFromGtfs(raw: number | null | undefined): WheelchairBoarding | null {
+  if (raw == null || raw === 0) return null;
+  return raw === 1 ? 'POSSIBLE' : raw === 2 ? 'NOT_POSSIBLE' : 'UNKNOWN';
 }
 
 export function bikesAllowedFromWire(raw: string | null | undefined): BikesAllowed | null {
-  if (raw == null || raw === 'NO_INFORMATION') return null;
-  if (raw === 'ALLOWED') return 'Allowed';
-  if (raw === 'NOT_ALLOWED') return 'NotAllowed';
-  return 'UNKNOWN';
+  return raw == null || raw === 'NO_INFORMATION' ? null : decode(BIKES_ALLOWED, raw);
 }
 
 export function occupancyFromWire(raw: string | null | undefined): OccupancyStatus | null {

@@ -67,6 +67,13 @@ test('chunk maps itineraries with realtime delays', () => {
   assert.equal(leg.realtimeState, 'UPDATED');
   assert.equal(leg.serviceDate, '2026-07-15');
   assert.equal(leg.fromName, 'Origin');
+  assert.equal(leg.fromGtfsId, '1:A');
+  // Display fields the wire leaves out are null.
+  assert.equal(leg.fromPlatformCode, null);
+  assert.equal(leg.toZoneId, null);
+  assert.equal(leg.routeGtfsId, null);
+  assert.equal(leg.routeColor, null);
+  assert.equal(leg.routeTextColor, null);
 });
 
 // The `pageInfo` frame is the terminal `done` event — it carries the continuation RoutePageInfo.

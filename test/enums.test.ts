@@ -11,9 +11,10 @@ import {
   realtimeStateFromWire,
   routingErrorCodeFromWire,
   transitModeFromWire,
+  wheelchairFromGtfs,
   wheelchairFromWire,
 } from '../src/enums.ts';
-import type { InputField, RealtimeState, RoutingErrorCode, TransitMode } from '../src/index.ts';
+import type { BikesAllowed, InputField, RealtimeState, RoutingErrorCode, TransitMode, WheelchairBoarding } from '../src/index.ts';
 
 const ROUTING_CONTRACT = path.join(path.dirname(path.dirname(fileURLToPath(import.meta.url))), 'src/contract/routing');
 
@@ -31,13 +32,17 @@ function wireValues(name: string): string[] {
   return values;
 }
 
-test('every contract enum value decodes to itself, not UNKNOWN', () => {
+test('every contract enum value decodes to itself in wire spelling, not UNKNOWN', () => {
   for (const value of [...wireValues('Mode'), ...wireValues('TransitMode')]) assert.equal(transitModeFromWire(value), value);
   for (const value of wireValues('RealtimeState')) assert.equal(realtimeStateFromWire(value), value);
   for (const value of wireValues('RoutingErrorCode')) assert.equal(routingErrorCodeFromWire(value), value);
   for (const value of wireValues('InputField')) assert.equal(inputFieldFromWire(value), value);
-  for (const value of wireValues('WheelchairBoarding')) assert.notEqual(wheelchairFromWire(value), 'UNKNOWN');
-  for (const value of wireValues('BikesAllowed')) assert.notEqual(bikesAllowedFromWire(value), 'UNKNOWN');
+  for (const value of wireValues('WheelchairBoarding')) {
+    assert.equal(wheelchairFromWire(value), value === 'NO_INFORMATION' ? null : value);
+  }
+  for (const value of wireValues('BikesAllowed')) {
+    assert.equal(bikesAllowedFromWire(value), value === 'NO_INFORMATION' ? null : value);
+  }
 });
 
 test('an unrecognized wire value decodes to UNKNOWN for every enum', () => {
@@ -63,11 +68,13 @@ test('absent and no-information values decode to null', () => {
   assert.equal(routingErrorCodeFromWire(undefined), 'UNKNOWN');
 });
 
-test('wheelchair and bikes keep their SDK spelling', () => {
-  assert.equal(wheelchairFromWire('POSSIBLE'), 'Possible');
-  assert.equal(wheelchairFromWire('NOT_POSSIBLE'), 'NotPossible');
-  assert.equal(bikesAllowedFromWire('ALLOWED'), 'Allowed');
-  assert.equal(bikesAllowedFromWire('NOT_ALLOWED'), 'NotAllowed');
+test('stop-search wheelchair codes decode like the routing enum', () => {
+  assert.equal(wheelchairFromGtfs(1), 'POSSIBLE');
+  assert.equal(wheelchairFromGtfs(2), 'NOT_POSSIBLE');
+  assert.equal(wheelchairFromGtfs(0), null);
+  assert.equal(wheelchairFromGtfs(null), null);
+  assert.equal(wheelchairFromGtfs(undefined), null);
+  assert.equal(wheelchairFromGtfs(3), 'UNKNOWN');
 });
 
 // Closed unions: these fail `npm run typecheck` if an enum type ever widens back to `string`.
@@ -79,3 +86,7 @@ export const notAState: RealtimeState = 'DELAYED';
 export const notACode: RoutingErrorCode = 'NEW_CODE';
 // @ts-expect-error not an InputField
 export const notAField: InputField = 'FROM_PLACE';
+// @ts-expect-error wire spelling only
+export const notWheelchair: WheelchairBoarding = 'Possible';
+// @ts-expect-error wire spelling only
+export const notBikes: BikesAllowed = 'Allowed';

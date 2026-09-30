@@ -61,8 +61,20 @@ export interface Leg {
   readonly serviceDate: string | null;
   readonly fromName: string | null;
   readonly toName: string | null;
+  /** Stop ids of the leg's endpoints; null for a coordinate endpoint. */
+  readonly fromGtfsId: string | null;
+  readonly toGtfsId: string | null;
+  readonly fromPlatformCode: string | null;
+  readonly toPlatformCode: string | null;
+  readonly fromZoneId: string | null;
+  readonly toZoneId: string | null;
+  readonly routeGtfsId: string | null;
   readonly routeShortName: string | null;
   readonly routeLongName: string | null;
+  /** Route colour as the feed gives it: GTFS hex without `#`, e.g. `FF0000`. */
+  readonly routeColor: string | null;
+  /** Route text colour as the feed gives it: GTFS hex without `#`, e.g. `FFFFFF`. */
+  readonly routeTextColor: string | null;
   readonly headsign: string | null;
   readonly distanceMeters: number | null;
   readonly durationSeconds: number | null;
@@ -149,9 +161,18 @@ export interface Departure {
   readonly tripGtfsId: string | null;
   /** GTFS service date the trip runs on (ISO `YYYY-MM-DD`) — pass it to {@link SpiderRouting.trip} and realtime `delays`. */
   readonly serviceDate: string;
+  readonly routeGtfsId: string | null;
   readonly routeShortName: string | null;
   readonly routeLongName: string | null;
+  /** Route colour as the feed gives it: GTFS hex without `#`, e.g. `FF0000`. */
+  readonly routeColor: string | null;
+  /** Route text colour as the feed gives it: GTFS hex without `#`, e.g. `FFFFFF`. */
+  readonly routeTextColor: string | null;
   readonly mode: TransitMode | null;
+  /** The stop this departure leaves from: the board's own stop, or one of a station's platforms. */
+  readonly stopGtfsId: string | null;
+  readonly platformCode: string | null;
+  readonly wheelchairAccessible: WheelchairBoarding | null;
 }
 
 export interface TripStop {
@@ -165,18 +186,26 @@ export interface TripStop {
   readonly realtimeDepartureEpochMs: number | null;
   readonly isRealtime: boolean;
   readonly wheelchairBoarding: WheelchairBoarding | null;
+  readonly platformCode: string | null;
+  readonly zoneId: string | null;
 }
 
 export interface TripDetails {
   readonly gtfsId: string;
   /** GTFS service date of this trip instance (ISO `YYYY-MM-DD`); null when the trip has no stop times on it. */
   readonly serviceDate: string | null;
+  readonly routeGtfsId: string | null;
   readonly routeShortName: string | null;
   readonly routeLongName: string | null;
+  /** Route colour as the feed gives it: GTFS hex without `#`, e.g. `FF0000`. */
+  readonly routeColor: string | null;
+  /** Route text colour as the feed gives it: GTFS hex without `#`, e.g. `FFFFFF`. */
+  readonly routeTextColor: string | null;
   readonly mode: TransitMode | null;
   readonly headsign: string | null;
   readonly directionId: string | null;
   readonly bikesAllowed: BikesAllowed | null;
+  readonly wheelchairAccessible: WheelchairBoarding | null;
   readonly stops: readonly TripStop[];
   readonly geometry: readonly LatLon[];
 }
@@ -739,8 +768,17 @@ function mapLeg(leg: LegWire): Leg {
     serviceDate: leg.serviceDate ?? null,
     fromName: leg.from.name ?? null,
     toName: leg.to.name ?? null,
+    fromGtfsId: leg.from.stop?.gtfsId ?? null,
+    toGtfsId: leg.to.stop?.gtfsId ?? null,
+    fromPlatformCode: leg.from.stop?.platformCode ?? null,
+    toPlatformCode: leg.to.stop?.platformCode ?? null,
+    fromZoneId: leg.from.stop?.zoneId ?? null,
+    toZoneId: leg.to.stop?.zoneId ?? null,
+    routeGtfsId: leg.route?.gtfsId ?? null,
     routeShortName: leg.route?.shortName ?? null,
     routeLongName: leg.route?.longName ?? null,
+    routeColor: leg.route?.color ?? null,
+    routeTextColor: leg.route?.textColor ?? null,
     headsign: leg.headsign ?? null,
     distanceMeters: leg.distance ?? null,
     durationSeconds: leg.duration ?? null,
@@ -768,9 +806,15 @@ function mapDepartures(stop: DeparturesStopWire): Departure[] {
       headsign: st.headsign ?? null,
       tripGtfsId: st.trip?.gtfsId ?? null,
       serviceDate: serviceDateOf(serviceDay),
+      routeGtfsId: route?.gtfsId ?? null,
       routeShortName: route?.shortName ?? null,
       routeLongName: route?.longName ?? null,
+      routeColor: route?.color ?? null,
+      routeTextColor: route?.textColor ?? null,
       mode: transitModeFromWire(route?.mode),
+      stopGtfsId: st.stop?.gtfsId ?? null,
+      platformCode: st.stop?.platformCode ?? null,
+      wheelchairAccessible: wheelchairFromWire(st.trip?.wheelchairAccessible),
     });
   }
   return out;
@@ -796,17 +840,23 @@ function mapTrip(trip: TripTripWire): TripDetails {
       realtimeDepartureEpochMs: at(st.realtimeDeparture),
       isRealtime: st.realtime ?? false,
       wheelchairBoarding: wheelchairFromWire(s.wheelchairBoarding),
+      platformCode: s.platformCode ?? null,
+      zoneId: s.zoneId ?? null,
     });
   }
   return {
     gtfsId: trip.gtfsId,
     serviceDate: serviceDay != null ? serviceDateOf(serviceDay) : null,
+    routeGtfsId: trip.route.gtfsId ?? null,
     routeShortName: trip.route.shortName ?? null,
     routeLongName: trip.route.longName ?? null,
+    routeColor: trip.route.color ?? null,
+    routeTextColor: trip.route.textColor ?? null,
     mode: transitModeFromWire(trip.route.mode),
     headsign: trip.tripHeadsign ?? null,
     directionId: trip.directionId ?? null,
     bikesAllowed: bikesAllowedFromWire(trip.bikesAllowed),
+    wheelchairAccessible: wheelchairFromWire(trip.wheelchairAccessible),
     stops,
     geometry: trip.tripGeometry?.points ? decodePolyline(trip.tripGeometry.points) : [],
   };
