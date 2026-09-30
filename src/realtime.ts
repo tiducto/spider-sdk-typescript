@@ -2,7 +2,7 @@ import type { Transport } from './http.ts';
 import { parseJson } from './http.ts';
 import type { SpiderResult } from './result.ts';
 import { failure, success } from './result.ts';
-import { badRequest, httpFailure, toSpiderError } from './errors.ts';
+import { badRequest, httpFailure, limitRefusal, toSpiderError } from './errors.ts';
 import { invalidServiceDate } from './serviceDate.ts';
 import type { OccupancyStatus } from './enums.ts';
 import { occupancyFromWire } from './enums.ts';
@@ -140,10 +140,14 @@ export class SpiderRealtime {
     const path = `/realtime/vehicles/by-trip/${encodeURIComponent(tripId)}`;
     try {
       const raw = await this.transport.getRaw(path);
-      if (raw.status === 404) {
-        return success({ vehicle: null, freshness: EMPTY_FRESHNESS });
+      if (!raw.ok) {
+        const error = httpFailure(`GET ${path}`, raw.status, raw.text);
+        // A 404 is "no vehicle" unless its body names a plan limit.
+        if (raw.status === 404 && limitRefusal(error) == null) {
+          return success({ vehicle: null, freshness: EMPTY_FRESHNESS });
+        }
+        throw error;
       }
-      if (!raw.ok) throw httpFailure(`GET ${path}`, raw.status, raw.text);
       const dto = parseJson<VehicleByTripResponseWire>(raw.text, path);
       return success({
         vehicle: dto.vehicle != null ? mapVehicle(dto.vehicle) : null,

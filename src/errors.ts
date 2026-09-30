@@ -34,8 +34,12 @@ export interface SpiderError {
 }
 
 const QUERY_RETIRED = 'query_retired';
-const SEARCH_LIMIT_REACHED = 'search_limit_reached';
-const AGREEMENT_INACTIVE = 'agreement_inactive';
+// Plan-limit refusals: the body code names the state, and the fixed wording stands in for a body without a message.
+const LIMIT_MESSAGES = {
+  search_limit_reached: 'search limit reached',
+  agreement_inactive: 'agreement is not active',
+} as const satisfies Partial<Record<SpiderErrorCode, string>>;
+type LimitCode = keyof typeof LIMIT_MESSAGES;
 
 /** A `bad_request` that names only the field, like the server's own validation errors. */
 export function badRequest(
@@ -52,14 +56,24 @@ export class TransportError extends Error {
   readonly httpStatus: number | undefined;
   readonly serverCode: string | undefined;
   readonly field: string | undefined;
+  /** The response body's own `message`, when it has one. */
+  readonly serverMessage: string | undefined;
 
-  constructor(kind: TransportErrorKind, message: string, httpStatus?: number, serverCode?: string, field?: string) {
+  constructor(
+    kind: TransportErrorKind,
+    message: string,
+    httpStatus?: number,
+    serverCode?: string,
+    field?: string,
+    serverMessage?: string,
+  ) {
     super(message);
     this.name = 'TransportError';
     this.kind = kind;
     this.httpStatus = httpStatus;
     this.serverCode = serverCode;
     this.field = field;
+    this.serverMessage = serverMessage;
   }
 }
 
@@ -91,7 +105,17 @@ export function httpFailure(where: string, status: number, text: string, detail?
   const env = parseErrorEnvelope(text);
   const message = (detail ?? env.message ?? text.slice(0, 300)).trim();
   const field = status === 400 ? FIELD_PROBLEM.exec(message)?.[1] : undefined;
-  return new TransportError('http', `${where} -> ${status}: ${message}`, status, env.code, field);
+  return new TransportError('http', `${where} -> ${status}: ${message}`, status, env.code, field, env.message);
+}
+
+/**
+ * The plan-limit error an `http` failure's body code names (`search_limit_reached`, `agreement_inactive`),
+ * whatever its status, or `undefined` when the body names neither.
+ */
+export function limitRefusal(e: TransportError): SpiderError | undefined {
+  if (e.kind !== 'http' || e.serverCode == null || !Object.hasOwn(LIMIT_MESSAGES, e.serverCode)) return undefined;
+  const code = e.serverCode as LimitCode;
+  return { code, message: e.serverMessage?.trim() || LIMIT_MESSAGES[code], httpStatus: e.httpStatus, serverCode: code };
 }
 
 export class DecodingError extends Error {
@@ -117,14 +141,10 @@ function isAbort(e: unknown): boolean {
 export function toSpiderError(e: unknown): SpiderError {
   if (e instanceof TransportError) {
     if (e.kind === 'http') {
+      // The body code decides whatever the status, since a proxy may rewrite it; plan limits have no status fallback.
+      const refusal = limitRefusal(e);
+      if (refusal != null) return refusal;
       const status = e.httpStatus ?? 0;
-      // The body code decides whatever the status, since a proxy may rewrite it; these two have no status fallback.
-      if (e.serverCode === SEARCH_LIMIT_REACHED) {
-        return { code: 'search_limit_reached', message: 'search limit reached', httpStatus: status, serverCode: e.serverCode };
-      }
-      if (e.serverCode === AGREEMENT_INACTIVE) {
-        return { code: 'agreement_inactive', message: 'agreement is not active', httpStatus: status, serverCode: e.serverCode };
-      }
       if (e.serverCode === QUERY_RETIRED || status === 410) {
         return { code: 'query_retired', message: 'persisted query is retired', httpStatus: status, serverCode: e.serverCode };
       }

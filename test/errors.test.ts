@@ -79,6 +79,17 @@ for (const [code, message] of [
   });
 }
 
+test('a plan-limit error takes the body message, and the fixed wording only when the body has none', () => {
+  const custom = toSpiderError(httpFailure('routing plan', 403, '{"error":"search_limit_reached","message":"trial searches used"}'));
+  assert.equal(custom.code, 'search_limit_reached');
+  assert.equal(custom.message, 'trial searches used');
+  const inactive = toSpiderError(httpFailure('GET /realtime/alerts', 403, '{"error":"agreement_inactive","message":"agreement expired"}'));
+  assert.equal(inactive.code, 'agreement_inactive');
+  assert.equal(inactive.message, 'agreement expired');
+  assert.equal(toSpiderError(httpFailure('routing plan', 403, '{"error":"search_limit_reached"}')).message, 'search limit reached');
+  assert.equal(toSpiderError(httpFailure('routing plan', 403, '{"error":"agreement_inactive","message":""}')).message, 'agreement is not active');
+});
+
 test('a 403 without a plan-limit code stays unauthorized', () => {
   for (const text of ['', 'Forbidden', '{"message":"Access denied"}', '{"error":"Access to this API has been disallowed"}']) {
     const err = toSpiderError(httpFailure('routing plan', 403, text));
