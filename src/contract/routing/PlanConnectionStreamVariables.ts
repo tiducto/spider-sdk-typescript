@@ -11,8 +11,8 @@ export interface PlanConnectionStreamVariables {
   via?: PlanViaLocationInput[];
   modes?: PlanModesInput;
   preferences?: PlanPreferencesInput;
-  targetResults?: number;
-  maxWindow?: string;
+  targetResults: number;
+  maxWindow: string;
   before?: string;
   after?: string;
 }

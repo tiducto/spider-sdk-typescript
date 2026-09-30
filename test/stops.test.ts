@@ -17,6 +17,7 @@ test('search builds the query and filter expression and maps hits', async () => 
   const body = JSON.parse(call.body);
   assert.equal(body.q, 'Hlavní');
   assert.equal(body.filter, 'city = "Brno"');
+  assert.equal(body.limit, 20);
 
   if (!result.isSuccess) throw new Error(result.error.code);
   assert.equal(result.data.length, 1);
@@ -24,6 +25,10 @@ test('search builds the query and filter expression and maps hits', async () => 
   assert.equal(result.data[0].city, 'Brno');
   assert.equal(result.data[0].region, 'JMK');
   assert.equal(result.data[0].district, null);
+  assert.deepEqual(result.data[0].modes, []);
+  assert.equal(result.data[0].code, null);
+  assert.equal(result.data[0].locationType, null);
+  assert.equal(result.data[0].wheelchairBoarding, null);
 });
 
 test('search with only a name omits the filter field', async () => {
@@ -110,7 +115,77 @@ test('search surfaces the server error message', async () => {
   const result = await client.stops.search({ region: 'Z' });
   assert.equal(result.isSuccess, false);
   if (!result.isSuccess) {
-    assert.equal(result.error.code, 'unknown');
+    assert.equal(result.error.code, 'bad_request');
+    assert.equal(result.error.field, undefined);
     assert.ok(result.error.message.includes('bad filter'));
   }
+});
+
+test('a gateway 400 naming limit is bad_request on limit', async () => {
+  const mock = mockFetch({ status: 400, json: { error: 'bad_request', message: 'limit is out of range' } });
+  const client = new SpiderClient('https://x', 'k', { fetch: mock.fetch });
+  const result = await client.stops.search({ name: 'x' });
+  assert.equal(result.isSuccess, false);
+  if (!result.isSuccess) {
+    assert.equal(result.error.code, 'bad_request');
+    assert.equal(result.error.field, 'limit');
+  }
+});
+
+test('search rejects a limit outside 1–50 as bad_request without a request', async () => {
+  const mock = mockFetch({ json: { hits: [], query: '' } });
+  const client = new SpiderClient('https://x', 'k', { fetch: mock.fetch });
+
+  for (const limit of [0, 51, 2.5, Number.NaN]) {
+    const result = await client.stops.search({ name: 'x', limit });
+    assert.equal(result.isSuccess, false, String(limit));
+    if (!result.isSuccess) {
+      assert.equal(result.error.code, 'bad_request');
+      assert.equal(result.error.field, 'limit');
+      assert.equal(result.error.message, 'limit is out of range');
+    }
+  }
+  const near = await client.stops.near(49.19, 16.61, { limit: 51 });
+  assert.equal(near.isSuccess, false);
+  assert.equal(mock.calls.length, 0);
+
+  await client.stops.search({ name: 'x', limit: 50 });
+  assert.equal(JSON.parse(mock.calls[0].body).limit, 50);
+});
+
+test('search filters by modes (any of), ignoring UNKNOWN', async () => {
+  const mock = mockFetch({ json: { hits: [], query: '' } });
+  const client = new SpiderClient('https://x', 'k', { fetch: mock.fetch });
+
+  await client.stops.search({ city: 'Brno', modes: ['TRAM', 'RAIL', 'UNKNOWN'] });
+  await client.stops.search({ modes: ['UNKNOWN'] });
+
+  assert.equal(JSON.parse(mock.calls[0].body).filter, 'city = "Brno" AND modes IN ["TRAM", "RAIL"]');
+  assert.equal('filter' in JSON.parse(mock.calls[1].body), false);
+});
+
+test('a stop carries its code, kind, accessibility and modes, with unknown values as UNKNOWN', async () => {
+  const mock = mockFetch({
+    json: {
+      hits: [
+        { gtfsId: '1:S', name: 'Nádraží', code: '12', locationType: 1, wheelchairBoarding: 1, modes: ['BUS', 'RAIL', 'HOVERCRAFT'] },
+        { gtfsId: '1:T', name: 'Točna', locationType: 0, wheelchairBoarding: 2 },
+        { gtfsId: '1:U', name: 'Úvoz', wheelchairBoarding: 7 },
+      ],
+      query: '',
+    },
+  });
+  const client = new SpiderClient('https://x', 'k', { fetch: mock.fetch });
+
+  const result = await client.stops.search({ name: 'Nádraží' });
+
+  if (!result.isSuccess) throw new Error(result.error.code);
+  const [station, stop, odd] = result.data;
+  assert.deepEqual(station.modes, ['BUS', 'RAIL', 'UNKNOWN']);
+  assert.equal(station.code, '12');
+  assert.equal(station.locationType, 1);
+  assert.equal(station.wheelchairBoarding, 'POSSIBLE');
+  assert.equal(stop.locationType, 0);
+  assert.equal(stop.wheelchairBoarding, 'NOT_POSSIBLE');
+  assert.equal(odd.wheelchairBoarding, 'UNKNOWN');
 });

@@ -1,6 +1,6 @@
-import type { StopDeparturesStop } from './StopDeparturesStop.ts';
+import type { StopDeparturesStop2 } from './StopDeparturesStop2.ts';
 
 export interface StopDeparturesData {
-  asStop?: StopDeparturesStop;
-  asStation?: StopDeparturesStop;
+  asStop?: StopDeparturesStop2;
+  asStation?: StopDeparturesStop2;
 }

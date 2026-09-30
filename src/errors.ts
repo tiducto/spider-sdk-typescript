@@ -1,9 +1,15 @@
+/**
+ * What went wrong. `bad_request` is an invalid or missing input, caught by the SDK before sending or
+ * rejected by the server; `field` names it. `query_retired` means the API no longer serves the persisted
+ * query behind the call (HTTP 410 Gone).
+ */
 export type SpiderErrorCode =
   | 'network'
   | 'timeout'
   | 'unauthorized'
   | 'bad_request'
   | 'not_found'
+  | 'query_retired'
   | 'server'
   | 'rate_limited'
   | 'decoding'
@@ -13,25 +19,24 @@ export interface SpiderError {
   readonly code: SpiderErrorCode;
   readonly message: string;
   readonly httpStatus?: number;
-  readonly serverCode?: string;
   /**
-   * For a `bad_request` (a server validation failure — over-cap `searchWindow`, malformed `via`, or a
-   * missing required field), the offending input field when the server names one. Undefined otherwise.
+   * The server's machine-readable error code, when it sends one: e.g. `persisted_query_rejected` on an
+   * `unauthorized` when the environment doesn't recognise the query id, or `query_retired`.
    */
+  readonly serverCode?: string;
+  /** For a `bad_request`, the input field it names (e.g. `searchWindow`, `maxWindow`, `via`, `limit`). */
   readonly field?: string;
   readonly cause?: unknown;
 }
 
-export class SpiderContractMismatchError extends Error {
-  readonly expected: string;
-  readonly actual: string;
+const QUERY_RETIRED = 'query_retired';
 
-  constructor(expected: string, actual: string) {
-    super(`Spider contract mismatch: this SDK speaks ${expected} but the gateway declared ${actual}`);
-    this.name = 'SpiderContractMismatchError';
-    this.expected = expected;
-    this.actual = actual;
-  }
+/** A `bad_request` that names only the field, like the server's own validation errors. */
+export function badRequest(
+  field: string,
+  problem: 'is required' | 'is out of range' | 'is invalid' = 'is out of range',
+): SpiderError {
+  return { code: 'bad_request', message: `${field} ${problem}`, field };
 }
 
 export type TransportErrorKind = 'http' | 'no_data' | 'upstream' | 'bad_request';
@@ -61,12 +66,26 @@ export function parseErrorEnvelope(text: string): { code?: string; message?: str
   }
   if (typeof body === 'object' && body !== null) {
     const b = body as Record<string, unknown>;
+    // The gateway's own rejections carry their code in `error` (e.g. "query_retired"); other
+    // services put a human sentence there, so only a code-shaped value counts.
+    const gatewayCode = typeof b.error === 'string' && /^[a-z][a-z0-9_]*$/.test(b.error) ? b.error : undefined;
     return {
-      code: typeof b.code === 'string' ? b.code : undefined,
+      code: typeof b.code === 'string' ? b.code : gatewayCode,
       message: typeof b.message === 'string' ? b.message : undefined,
     };
   }
   return {};
+}
+
+// The fixed wording of the gateway's and services' own 400s, e.g. "limit is out of range".
+const FIELD_PROBLEM = /^([A-Za-z_]\w*) (?:is required|is out of range|is invalid)$/;
+
+/** A non-2xx response → an `http` TransportError carrying the body's error code, and for a 400 the field it names. */
+export function httpFailure(where: string, status: number, text: string, detail?: string): TransportError {
+  const env = parseErrorEnvelope(text);
+  const message = (detail ?? env.message ?? text.slice(0, 300)).trim();
+  const field = status === 400 ? FIELD_PROBLEM.exec(message)?.[1] : undefined;
+  return new TransportError('http', `${where} -> ${status}: ${message}`, status, env.code, field);
 }
 
 export class DecodingError extends Error {
@@ -93,14 +112,18 @@ export function toSpiderError(e: unknown): SpiderError {
   if (e instanceof TransportError) {
     if (e.kind === 'http') {
       const status = e.httpStatus ?? 0;
+      if (e.serverCode === QUERY_RETIRED || status === 410) {
+        return { code: 'query_retired', message: 'persisted query is retired', httpStatus: status, serverCode: e.serverCode };
+      }
       const code: SpiderErrorCode =
-        status === 401 || status === 403 ? 'unauthorized'
-          : status === 404 ? 'not_found'
-            : status === 408 || status === 504 ? 'timeout'
-              : status === 429 ? 'rate_limited'
-                : status >= 500 && status <= 599 ? 'server'
-                  : 'unknown';
-      return { code, message: e.message, httpStatus: status, serverCode: e.serverCode };
+        status === 400 ? 'bad_request'
+          : status === 401 || status === 403 ? 'unauthorized'
+            : status === 404 ? 'not_found'
+              : status === 408 || status === 504 ? 'timeout'
+                : status === 429 ? 'rate_limited'
+                  : status >= 500 && status <= 599 ? 'server'
+                    : 'unknown';
+      return { code, message: e.message, httpStatus: status, serverCode: e.serverCode, field: e.field };
     }
     if (e.kind === 'no_data') return { code: 'not_found', message: e.message };
     if (e.kind === 'bad_request') return { code: 'bad_request', message: e.message, field: e.field };

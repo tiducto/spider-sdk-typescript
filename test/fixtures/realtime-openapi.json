@@ -3,7 +3,7 @@
   "info": {
     "title": "Tiducto Transit API — Realtime",
     "version": "0.7",
-    "description": "GTFS-RT live data (vehicles, delays, alerts) — a plain-REST customer surface (poll-based, key-auth). Companion to routing and stops; the three share one pack version. Deliberately poll-only (cacheable, high-fanout) — no streaming/subscription surface, so it is OpenAPI, not AsyncAPI. Enum-ish fields are bare strings so unrecognized producer values pass through unchanged."
+    "description": "GTFS-RT live data (vehicles, delays, alerts) — a plain-REST customer surface (poll-based, key-auth). Companion to routing and stops; the three share one pack version. Deliberately poll-only (cacheable, high-fanout) — no streaming/subscription surface, so it is OpenAPI, not AsyncAPI. Enum-ish fields are bare strings so unrecognized producer values pass through unchanged. Every id in a response is feed-prefixed (`<feedId>:<id>`), the same form routing's `gtfsId` and stop search return. Id inputs accept the prefixed form or the raw GTFS id."
   },
   "servers": [
     {
@@ -24,7 +24,7 @@
   "paths": {
     "/realtime/vehicles": {
       "get": {
-        "summary": "Live vehicle positions for the given trips.",
+        "summary": "Live vehicle positions for the given trips. `tripIds` is required: 1 to 50 comma-separated trip ids per request. None, or more than 50, is an HTTP 400 naming `tripIds`.",
         "operationId": "realtime_vehicles",
         "x-surface": "realtime",
         "parameters": [
@@ -47,6 +47,9 @@
                 }
               }
             }
+          },
+          "400": {
+            "description": "Missing or out-of-range `tripIds`; the error names the field."
           },
           "401": {
             "description": "Missing or invalid apikey.",
@@ -162,7 +165,7 @@
     },
     "/realtime/delays": {
       "post": {
-        "summary": "Live schedule deviation, resolved per trip instance (trip_id + service date).\n  Group the trip ids you want by the GTFS serviceDate — ISO-8601 YYYY-MM-DD, the\n  same value each plan leg's serviceDate carries — take it from the plan leg,\n  never from the departure clock time (GTFS times may exceed 24:00). A trip\n  instance the feed doesn't hold comes back in that group's `missing`, not\n  painted with another day's delay.",
+        "summary": "Live schedule deviation, resolved per trip instance (trip_id + service date).\n  Group the trip ids you want by the GTFS serviceDate — ISO-8601 YYYY-MM-DD, the\n  same value a plan leg's, departure's or trip's serviceDate carries — take it\n  from there, never from the departure clock time (GTFS times may exceed 24:00).\n  A trip instance the feed doesn't hold comes back in that group's `missing`,\n  not painted with another day's delay.",
         "operationId": "realtime_delays",
         "x-surface": "realtime",
         "requestBody": {
@@ -196,6 +199,9 @@
                 }
               }
             }
+          },
+          "400": {
+            "description": "Missing or out-of-range `tripIds`, or a missing or non-ISO `serviceDate`; the error names the field."
           },
           "401": {
             "description": "Missing or invalid apikey.",
@@ -321,6 +327,7 @@
           },
           "missing": {
             "type": "array",
+            "description": "Requested trip ids with no live vehicle, feed-prefixed even when sent raw.",
             "items": {
               "type": "string"
             }
@@ -354,7 +361,7 @@
       },
       "Vehicle": {
         "type": "object",
-        "description": "A vehicle's live position. GTFS-RT producers populate wildly different subsets, so every field is optional. `currentStatus` and `occupancyStatus` are raw GTFS-RT strings passed through unchanged (no enum — unrecognized producer values must survive).",
+        "description": "A vehicle's live position. GTFS-RT producers populate wildly different subsets, so every field is optional. `currentStatus` and `occupancyStatus` are raw GTFS-RT strings passed through unchanged (no enum — unrecognized producer values must survive). `tripId`, `routeId`, `stopId` and `vehicleId` are feed-prefixed (`<feedId>:<id>`).",
         "properties": {
           "tripId": {
             "type": "string"
@@ -398,7 +405,7 @@
       },
       "DelaysRequest": {
         "type": "object",
-        "description": "POST body for `/realtime/delays`. Delays are resolved per trip *instance*: a GTFS-RT TripUpdate is bound to a trip instance by (trip_id, start_date), so trip ids are grouped by the GTFS `serviceDate` they run on. Group ids by date rather than sending flat (tripId, serviceDate) pairs — the cardinality is 1-2 dates x many trips.",
+        "description": "POST body for `/realtime/delays`. Delays are resolved per trip *instance*: a GTFS-RT TripUpdate is bound to a trip instance by (trip_id, start_date), so trip ids are grouped by the GTFS `serviceDate` they run on. Group ids by date rather than sending flat (tripId, serviceDate) pairs — the cardinality is 1-2 dates x many trips. `tripIds` is required: 1 to 50 trip ids per request, counted across all `queries`. None, or more than 50, is an HTTP 400 naming `tripIds`.",
         "properties": {
           "queries": {
             "type": "array",
@@ -416,10 +423,11 @@
         "properties": {
           "serviceDate": {
             "type": "string",
-            "description": "GTFS service date as ISO-8601 `YYYY-MM-DD` — the same format the plan leg's `serviceDate` carries, so pass it straight through. A service date is not a civil date (times may exceed 24:00), so take it from the plan leg, never derive it from the departure clock time. A non-ISO value is rejected with 400."
+            "description": "GTFS service date as ISO-8601 `YYYY-MM-DD` — the same format a plan leg's, departure's or trip's `serviceDate` carries, so pass it straight through. A service date is not a civil date (times may exceed 24:00), so take it from the plan leg, departure or trip, never derive it from the departure clock time. A missing or non-ISO value is an HTTP 400 naming `serviceDate`."
           },
           "tripIds": {
             "type": "array",
+            "description": "Counts toward the request's limit of 50 trip ids across all `queries`.",
             "items": {
               "type": "string"
             }
@@ -466,6 +474,7 @@
           },
           "missing": {
             "type": "array",
+            "description": "Trip ids of this group with no live delay, feed-prefixed even when sent raw.",
             "items": {
               "type": "string"
             }
@@ -474,7 +483,7 @@
       },
       "Delay": {
         "type": "object",
-        "description": "Live schedule deviation for a trip. `scheduleRelationship` is a raw GTFS-RT string.",
+        "description": "Live schedule deviation for a trip. `scheduleRelationship` is a raw GTFS-RT string. `tripId` and `routeId` are feed-prefixed (`<feedId>:<id>`).",
         "properties": {
           "tripId": {
             "type": "string"
@@ -500,6 +509,7 @@
       },
       "StopTimeUpdate": {
         "type": "object",
+        "description": "`stopId` is feed-prefixed (`<feedId>:<id>`).",
         "properties": {
           "stopId": {
             "type": "string"
@@ -542,7 +552,7 @@
       },
       "Alert": {
         "type": "object",
-        "description": "A service alert. Text is already resolved to one language by the gateway. `cause`/`effect`/`severityLevel` are raw GTFS-RT strings.",
+        "description": "A service alert. Text is already resolved to one language by the gateway. `cause`/`effect`/`severityLevel` are raw GTFS-RT strings. `id` is feed-prefixed (`<feedId>:<id>`).",
         "properties": {
           "id": {
             "type": "string"
@@ -596,6 +606,7 @@
       },
       "InformedEntity": {
         "type": "object",
+        "description": "Every id here is feed-prefixed (`<feedId>:<id>`).",
         "properties": {
           "agencyId": {
             "type": "string"

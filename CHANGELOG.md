@@ -1,5 +1,48 @@
 # Changelog
 
+## Unreleased (1.0.0)
+
+Targets Spider API contract 1.0. The first stable release: from here on, breaking changes need a new major.
+
+### Changed
+
+- **`planStream` / `planStreamNext` / `planStreamPrevious` require `targetResults` and `maxWindowMinutes`.**
+  There is no SDK default; `maxWindowMinutes` must be at least 120.
+- **`WheelchairBoarding` and `BikesAllowed` use the wire spelling:** `'POSSIBLE' | 'NOT_POSSIBLE' | 'UNKNOWN'`
+  and `'ALLOWED' | 'NOT_ALLOWED' | 'UNKNOWN'`.
+- **Every decoded enum is a closed union with `'UNKNOWN'`** for a value this SDK version doesn't know
+  (`TransitMode`, `RealtimeState`, `RoutingErrorCode`, `InputField`, `WheelchairBoarding`, `BikesAllowed`,
+  `OccupancyStatus`). `NO_INFORMATION` / `NO_DATA_AVAILABLE` stay `null`.
+- **HTTP 400 is `bad_request`**, with `field` set when the server names one.
+- **Invalid input is rejected before any request**, as `bad_request` naming only the field (e.g.
+  `maxWindow is out of range`): a stream window under 2 h, a departures `timeRange` outside (0, 86400] s,
+  more than 50 realtime trip ids, a stop-search `limit` outside 1–50, a via pass-through without 1–10 stop
+  ids, or a visit wait outside 0–86400 s. Nothing is clamped.
+- Departures always send 30 departures over 24 h unless told otherwise; stop search always sends `limit` (20).
+- An unknown persisted-query id (403 `persisted_query_rejected`) stays `unauthorized` and keeps the
+  gateway's message.
+
+### Added
+
+- **`'query_retired'` error code** for a persisted query the API no longer serves (HTTP 410).
+- **Display fields.** `Leg`: `fromGtfsId`, `toGtfsId`, `fromPlatformCode`, `toPlatformCode`, `fromZoneId`,
+  `toZoneId`, `routeGtfsId`, `routeColor`, `routeTextColor`. `Departure`: `routeGtfsId`, `routeColor`,
+  `routeTextColor`, `stopGtfsId`, `platformCode`, `wheelchairAccessible`. `TripDetails`: `routeGtfsId`,
+  `routeColor`, `routeTextColor`, `wheelchairAccessible`. `TripStop`: `platformCode`, `zoneId`. Colours are
+  the feed's GTFS hex without `#`.
+- **`Departure.serviceDate` and `TripDetails.serviceDate`** (ISO `YYYY-MM-DD`); `trip()` and `delays` reject a
+  malformed date.
+- **`routingErrors` on the streamed `done` event.** A `LOCATION_NOT_FOUND` names `FROM`, `TO` or `VIA`.
+- **Stops:** `Stop.code`, `Stop.locationType`, `Stop.wheelchairBoarding`, `Stop.modes`, and a `modes` filter on
+  `StopFilter` (stops served by at least one of the modes). Search text also matches a stop's code, town
+  and district.
+- `RealtimeState`, `RoutingErrorCode` and `InputField` types are exported.
+
+### Removed
+
+- `SpiderContractMismatchError`: a gateway declaring another contract major is no longer an error.
+- The departures filter that dropped rows whose headsign equals the stop name.
+
 ## 0.7.1 — 2026-09-25
 
 Targets Spider API contract 0.7 (unchanged). Pre-1.0 release — the public API is not yet stable and may

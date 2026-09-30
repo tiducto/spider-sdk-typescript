@@ -1,12 +1,14 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { DecodingError, TransportError, toSpiderError, parseErrorEnvelope } from '../src/errors.ts';
+import { DecodingError, TransportError, toSpiderError, parseErrorEnvelope, httpFailure } from '../src/errors.ts';
 
 test('maps HTTP statuses to error codes', () => {
+  assert.equal(toSpiderError(new TransportError('http', 'x', 400)).code, 'bad_request');
   assert.equal(toSpiderError(new TransportError('http', 'x', 401)).code, 'unauthorized');
   assert.equal(toSpiderError(new TransportError('http', 'x', 403)).code, 'unauthorized');
   assert.equal(toSpiderError(new TransportError('http', 'x', 404)).code, 'not_found');
   assert.equal(toSpiderError(new TransportError('http', 'x', 408)).code, 'timeout');
+  assert.equal(toSpiderError(new TransportError('http', 'x', 410)).code, 'query_retired');
   assert.equal(toSpiderError(new TransportError('http', 'x', 429)).code, 'rate_limited');
   assert.equal(toSpiderError(new TransportError('http', 'x', 503)).code, 'server');
   assert.equal(toSpiderError(new TransportError('http', 'x', 418)).code, 'unknown');
@@ -34,4 +36,47 @@ test('parseErrorEnvelope extracts code and message, tolerates non-JSON', () => {
   assert.deepEqual(parseErrorEnvelope('{"code":"forbidden","message":"nope"}'), { code: 'forbidden', message: 'nope' });
   assert.deepEqual(parseErrorEnvelope('plain text'), {});
   assert.deepEqual(parseErrorEnvelope('{"message":"only msg"}'), { code: undefined, message: 'only msg' });
+});
+
+test('parseErrorEnvelope takes a code-shaped gateway `error` as the code, but not a sentence', () => {
+  assert.deepEqual(
+    parseErrorEnvelope('{"error":"persisted_query_rejected","message":"unknown persisted-query id: x"}'),
+    { code: 'persisted_query_rejected', message: 'unknown persisted-query id: x' },
+  );
+  assert.deepEqual(parseErrorEnvelope('{"error":"Access to this API has been disallowed"}'), { code: undefined, message: undefined });
+});
+
+test('a query_retired body is query_retired with a message that states the state', () => {
+  const retired = toSpiderError(httpFailure('routing plan', 410, '{"error":"query_retired","message":"persisted query is retired"}'));
+  assert.equal(retired.code, 'query_retired');
+  assert.equal(retired.httpStatus, 410);
+  assert.equal(retired.serverCode, 'query_retired');
+  assert.equal(retired.message, 'persisted query is retired');
+  // The body code decides even when a proxy rewrites the status, and 410 alone is the fallback.
+  assert.equal(toSpiderError(httpFailure('routing plan', 400, '{"error":"query_retired"}')).code, 'query_retired');
+  assert.equal(toSpiderError(httpFailure('routing plan', 410, '')).code, 'query_retired');
+});
+
+test('a 403 persisted_query_rejected stays unauthorized with the gateway message', () => {
+  const unknown = toSpiderError(httpFailure('routing plan', 403, '{"error":"persisted_query_rejected","message":"unknown persisted-query id: x"}'));
+  assert.equal(unknown.code, 'unauthorized');
+  assert.equal(unknown.httpStatus, 403);
+  assert.equal(unknown.serverCode, 'persisted_query_rejected');
+  assert.equal(unknown.message, 'routing plan -> 403: unknown persisted-query id: x');
+});
+
+test('a 400 naming a field is bad_request with that field, from a JSON envelope or plain text', () => {
+  const stops = toSpiderError(httpFailure('POST /stops/search', 400, '{"error":"bad_request","message":"limit is out of range"}'));
+  assert.equal(stops.code, 'bad_request');
+  assert.equal(stops.field, 'limit');
+  const realtime = toSpiderError(httpFailure('GET /realtime/vehicles', 400, 'tripIds is out of range\n'));
+  assert.equal(realtime.code, 'bad_request');
+  assert.equal(realtime.field, 'tripIds');
+  assert.equal(realtime.message, 'GET /realtime/vehicles -> 400: tripIds is out of range');
+  const search = toSpiderError(httpFailure('POST /stops/search', 400, '{"message":"Attribute `name` is not filterable."}'));
+  assert.equal(search.code, 'bad_request');
+  assert.equal(search.field, undefined);
+  assert.equal(toSpiderError(httpFailure('POST /stops/search', 400, '{"message":"hitsPerPage is not allowed"}')).field, undefined);
+  assert.equal(toSpiderError(httpFailure('POST /stops/search', 400, '{"message":"limit is invalid"}')).field, 'limit');
+  assert.equal(toSpiderError(httpFailure('GET /x', 404, 'limit is out of range')).field, undefined);
 });

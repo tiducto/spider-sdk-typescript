@@ -6,4 +6,6 @@ export interface TripStop {
   lat?: number;
   lon?: number;
   wheelchairBoarding?: WheelchairBoarding;
+  platformCode?: string;
+  zoneId?: string;
 }

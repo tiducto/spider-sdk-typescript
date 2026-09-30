@@ -2,7 +2,8 @@ import type { Transport } from './http.ts';
 import { parseJson } from './http.ts';
 import type { SpiderResult } from './result.ts';
 import { failure, success } from './result.ts';
-import { SpiderContractMismatchError, TransportError, toSpiderError } from './errors.ts';
+import { badRequest, httpFailure, toSpiderError } from './errors.ts';
+import { invalidServiceDate } from './serviceDate.ts';
 import type { OccupancyStatus } from './enums.ts';
 import { occupancyFromWire } from './enums.ts';
 
@@ -11,6 +12,7 @@ export interface FeedFreshness {
   readonly staleSeconds: number | null;
 }
 
+/** A vehicle's live position. `tripId`, `routeId`, `stopId` and `vehicleId` are feed-prefixed (`<feedId>:<id>`). */
 export interface LiveVehicle {
   readonly tripId: string | null;
   readonly routeId: string | null;
@@ -107,6 +109,7 @@ export interface ServiceAlerts {
 const EMPTY_FRESHNESS: FeedFreshness = { feedTimestampEpochMs: null, staleSeconds: null };
 const EMPTY_POSITIONS: VehiclePositions = { vehicles: [], missing: [], freshness: EMPTY_FRESHNESS };
 const EMPTY_DELAYS: TripDelays = { groups: [], freshness: EMPTY_FRESHNESS };
+const MAX_TRIP_IDS = 50;
 
 export class SpiderRealtime {
   private readonly transport: Transport;
@@ -115,8 +118,10 @@ export class SpiderRealtime {
     this.transport = transport;
   }
 
+  /** Live positions for up to 50 trips. Empty input skips the call; more than 50 fails as `bad_request` without a request. */
   async vehicles(tripIds: readonly string[]): Promise<SpiderResult<VehiclePositions>> {
     if (tripIds.length === 0) return success(EMPTY_POSITIONS);
+    if (tripIds.length > MAX_TRIP_IDS) return failure(badRequest('tripIds'));
     try {
       const dto = await this.transport.getJson<VehiclesResponseWire>('/realtime/vehicles', {
         tripIds: tripIds.join(','),
@@ -127,7 +132,6 @@ export class SpiderRealtime {
         freshness: mapFreshness(dto),
       });
     } catch (e) {
-      if (e instanceof SpiderContractMismatchError) throw e;
       return failure(toSpiderError(e));
     }
   }
@@ -139,26 +143,25 @@ export class SpiderRealtime {
       if (raw.status === 404) {
         return success({ vehicle: null, freshness: EMPTY_FRESHNESS });
       }
-      if (!raw.ok) {
-        throw new TransportError('http', `GET ${path} -> ${raw.status}: ${raw.text.slice(0, 300)}`, raw.status);
-      }
+      if (!raw.ok) throw httpFailure(`GET ${path}`, raw.status, raw.text);
       const dto = parseJson<VehicleByTripResponseWire>(raw.text, path);
       return success({
         vehicle: dto.vehicle != null ? mapVehicle(dto.vehicle) : null,
         freshness: mapFreshness(dto),
       });
     } catch (e) {
-      if (e instanceof SpiderContractMismatchError) throw e;
       return failure(toSpiderError(e));
     }
   }
 
   /**
    * Live delays, resolved per `(tripId, serviceDate)` instance: group trip ids by the GTFS service date
-   * (`YYYYMMDD`) they run on — pass each plan leg's `serviceDate` through. Empty input skips the call.
+   * (ISO `YYYY-MM-DD`) they run on — pass each plan leg's or departure's `serviceDate` through. Up to 50 trip ids
+   * in total across all dates. Empty input skips the call; a malformed date or more than 50 ids fails as
+   * `bad_request` without a request.
    */
   async delays(byServiceDate: Readonly<Record<string, readonly string[]>>): Promise<SpiderResult<TripDelays>>;
-  /** Live delays for `tripIds` all on one `serviceDate` (`YYYYMMDD`) — the common single-day case. */
+  /** Live delays for `tripIds` all on one `serviceDate` (ISO `YYYY-MM-DD`) — the common single-day case. */
   async delays(tripIds: readonly string[], serviceDate: string): Promise<SpiderResult<TripDelays>>;
   async delays(
     arg: Readonly<Record<string, readonly string[]>> | readonly string[],
@@ -168,7 +171,13 @@ export class SpiderRealtime {
       ? { [serviceDate]: arg as readonly string[] }
       : arg as Readonly<Record<string, readonly string[]>>;
     const queries = Object.entries(byServiceDate).map(([date, tripIds]) => ({ serviceDate: date, tripIds: [...tripIds] }));
-    if (queries.every((q) => q.tripIds.length === 0)) return success(EMPTY_DELAYS);
+    for (const q of queries) {
+      const invalid = invalidServiceDate(q.serviceDate);
+      if (invalid != null) return failure(invalid);
+    }
+    const total = queries.reduce((n, q) => n + q.tripIds.length, 0);
+    if (total === 0) return success(EMPTY_DELAYS);
+    if (total > MAX_TRIP_IDS) return failure(badRequest('tripIds'));
     try {
       const request: DelaysRequestWire = { queries };
       const dto = await this.transport.postJson<DelaysResponseWire>('/realtime/delays', request);
@@ -177,7 +186,6 @@ export class SpiderRealtime {
         freshness: mapFreshness(dto),
       });
     } catch (e) {
-      if (e instanceof SpiderContractMismatchError) throw e;
       return failure(toSpiderError(e));
     }
   }
@@ -190,7 +198,6 @@ export class SpiderRealtime {
         freshness: mapFreshness(dto),
       });
     } catch (e) {
-      if (e instanceof SpiderContractMismatchError) throw e;
       return failure(toSpiderError(e));
     }
   }
