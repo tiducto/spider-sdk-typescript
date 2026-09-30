@@ -1,9 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { Location, SpiderClient } from '../src/index.ts';
+import { Location, SpiderClient, ViaLocation } from '../src/index.ts';
 import { CONTRACT_VERSION } from '../src/contract.ts';
 import { SDK_IDENTITY } from '../src/sdk.ts';
-import { PLAN } from '../src/persistedQueries.ts';
+import { DEPARTURES, PLAN } from '../src/persistedQueries.ts';
 import { mockFetch } from './support.ts';
 
 const PLAN_ENVELOPE = {
@@ -149,8 +149,9 @@ test('departures maps stoptimes, keeps rows headed for the stop itself, and carr
   const result = await client.routing.departures('U1', 5);
 
   const body = JSON.parse(mock.calls[0].body);
-  assert.equal(body.id, '70a644fe3c6b2cbf5b2d70cef8230c1428bea6357ae1766772162d86469563d0');
+  assert.equal(body.id, DEPARTURES.id);
   assert.equal(body.variables.numberOfDepartures, 5);
+  assert.equal(body.variables.timeRange, 86_400);
 
   if (!result.isSuccess) throw new Error(result.error.code);
   // A headsign equal to the stop name is a real departure (e.g. a loop line), not a terminus row.
@@ -287,7 +288,7 @@ test('a top-level BAD_REQUEST error becomes a bad_request failure with field + m
     json: {
       data: null,
       errors: [
-        { message: 'searchWindow exceeds the maximum of PT2H', extensions: { code: 'BAD_REQUEST', field: 'searchWindow' } },
+        { message: 'searchWindow is out of range', extensions: { code: 'BAD_REQUEST', field: 'searchWindow' } },
       ],
     },
   });
@@ -300,7 +301,7 @@ test('a top-level BAD_REQUEST error becomes a bad_request failure with field + m
   if (!result.isSuccess) {
     assert.equal(result.error.code, 'bad_request');
     assert.equal(result.error.field, 'searchWindow');
-    assert.equal(result.error.message, 'searchWindow exceeds the maximum of PT2H');
+    assert.equal(result.error.message, 'searchWindow is out of range');
   }
 });
 
@@ -312,20 +313,149 @@ test('a gateway declaring another contract major is not an error', async () => {
   assert.equal(result.isSuccess, true);
 });
 
-test('a retired persisted-query id is an unauthorized failure that says to update the SDK', async () => {
-  const mock = mockFetch({
-    status: 403,
-    json: { error: 'persisted_query_rejected', message: `unknown persisted-query id: ${PLAN.id}` },
-  });
+test('a retired persisted query is a query_retired failure that states the state', async () => {
+  const mock = mockFetch({ status: 410, json: { error: 'query_retired', message: 'persisted query is retired' } });
+  const client = new SpiderClient('https://x', 'k', { fetch: mock.fetch });
+  const result = await client.routing.plan({ origin: Location.coordinate(1, 2), destination: Location.coordinate(3, 4) });
+  assert.equal(result.isSuccess, false);
+  if (!result.isSuccess) {
+    assert.equal(result.error.code, 'query_retired');
+    assert.equal(result.error.httpStatus, 410);
+    assert.equal(result.error.serverCode, 'query_retired');
+    assert.equal(result.error.message, 'persisted query is retired');
+  }
+});
+
+test('an unknown persisted-query id stays an unauthorized failure with the gateway message', async () => {
+  const mock = mockFetch({ status: 403, json: { error: 'persisted_query_rejected', message: 'unknown persisted-query id' } });
   const client = new SpiderClient('https://x', 'k', { fetch: mock.fetch });
   const result = await client.routing.plan({ origin: Location.coordinate(1, 2), destination: Location.coordinate(3, 4) });
   assert.equal(result.isSuccess, false);
   if (!result.isSuccess) {
     assert.equal(result.error.code, 'unauthorized');
-    assert.equal(result.error.httpStatus, 403);
     assert.equal(result.error.serverCode, 'persisted_query_rejected');
-    assert.match(result.error.message, /update the SDK/);
+    assert.equal(result.error.message, 'routing plan -> 403: unknown persisted-query id');
   }
+});
+
+test('routing errors decode FROM/TO/VIA, and unknown codes, fields and enums decode to UNKNOWN', async () => {
+  const envelope = structuredClone(PLAN_ENVELOPE) as unknown as {
+    data: { planConnection: { routingErrors: unknown[]; edges: { node: { legs: Record<string, unknown>[] } }[] } };
+  };
+  envelope.data.planConnection.routingErrors = [
+    { code: 'LOCATION_NOT_FOUND', description: 'unknown via stop', inputField: 'VIA' },
+    { code: 'LOCATION_NOT_FOUND', description: 'unknown origin', inputField: 'FROM' },
+    { code: 'SOMETHING_NEW', description: 'x', inputField: 'FROM_PLACE' },
+  ];
+  const leg = envelope.data.planConnection.edges[0].node.legs[0];
+  leg.mode = 'HOVERCRAFT';
+  leg.realtimeState = 'DELAYED';
+  leg.from = { name: 'A', stop: { gtfsId: '1:A', wheelchairBoarding: 'PARTIAL' } };
+  leg.trip = { gtfsId: '1:trip', bikesAllowed: 'FOLDING_ONLY' };
+  const mock = mockFetch({ json: envelope });
+  const client = new SpiderClient('https://x', 'k', { fetch: mock.fetch });
+
+  const result = await client.routing.plan({ origin: Location.stop('1:A'), destination: Location.stop('1:B') });
+
+  if (!result.isSuccess) throw new Error(result.error.code);
+  assert.deepEqual(result.data.routingErrors, [
+    { code: 'LOCATION_NOT_FOUND', description: 'unknown via stop', inputField: 'VIA' },
+    { code: 'LOCATION_NOT_FOUND', description: 'unknown origin', inputField: 'FROM' },
+    { code: 'UNKNOWN', description: 'x', inputField: 'UNKNOWN' },
+  ]);
+  const mapped = result.data.edges[0].itinerary.legs[0];
+  assert.equal(mapped.mode, 'UNKNOWN');
+  assert.equal(mapped.realtimeState, 'UNKNOWN');
+  assert.equal(mapped.fromWheelchair, 'UNKNOWN');
+  assert.equal(mapped.bikesAllowed, 'UNKNOWN');
+});
+
+test('departures and trip decode unknown realtime states and modes to UNKNOWN', async () => {
+  const mock = mockFetch({
+    json: {
+      data: {
+        asStop: {
+          gtfsId: 'U1',
+          name: 'Main',
+          stoptimesWithoutPatterns: [
+            { serviceDay: 1000, scheduledDeparture: 60, realtimeState: 'DELAYED', trip: { gtfsId: 't1', route: { gtfsId: 'r1', mode: 'HOVERCRAFT' } } },
+          ],
+        },
+      },
+    },
+  });
+  const client = new SpiderClient('https://x', 'k', { fetch: mock.fetch });
+  const result = await client.routing.departures('U1');
+
+  if (!result.isSuccess) throw new Error(result.error.code);
+  assert.equal(result.data[0].realtimeState, 'UNKNOWN');
+  assert.equal(result.data[0].mode, 'UNKNOWN');
+});
+
+test('departures sends 30 departures over 24 h by default', async () => {
+  const mock = mockFetch({ json: { data: { asStop: { gtfsId: 'U1', name: 'Main', stoptimesWithoutPatterns: [] } } } });
+  const client = new SpiderClient('https://x', 'k', { fetch: mock.fetch });
+
+  await client.routing.departures('U1');
+
+  const body = JSON.parse(mock.calls[0].body);
+  assert.equal(body.variables.numberOfDepartures, 30);
+  assert.equal(body.variables.timeRange, 86_400);
+});
+
+test('departures rejects a timeRange outside (0, 24 h] as bad_request without a request', async () => {
+  const mock = mockFetch({ json: { data: { asStop: { gtfsId: 'U1', name: 'Main', stoptimesWithoutPatterns: [] } } } });
+  const client = new SpiderClient('https://x', 'k', { fetch: mock.fetch });
+
+  for (const timeRangeSeconds of [0, -60, 86_401, Number.NaN]) {
+    const result = await client.routing.departures('U1', 30, { timeRangeSeconds });
+    assert.equal(result.isSuccess, false, String(timeRangeSeconds));
+    if (!result.isSuccess) {
+      assert.equal(result.error.code, 'bad_request');
+      assert.equal(result.error.field, 'timeRange');
+      assert.equal(result.error.message, 'timeRange is out of range');
+    }
+  }
+  assert.equal(mock.calls.length, 0);
+
+  await client.routing.departures('U1', 30, { timeRangeSeconds: 86_400 });
+  assert.equal(JSON.parse(mock.calls[0].body).variables.timeRange, 86_400);
+});
+
+test('plan rejects a via with 0 or more than 10 stop ids, or a wait outside 0–24 h, without a request', async () => {
+  const mock = mockFetch({ json: PLAN_ENVELOPE });
+  const client = new SpiderClient('https://x', 'k', { fetch: mock.fetch });
+  const ids = (n: number) => Array.from({ length: n }, (_, i) => `1:S${i}`);
+  const plan = (via: ViaLocation[]) =>
+    client.routing.plan({ origin: Location.stop('1:A'), destination: Location.stop('1:B'), via });
+
+  for (const via of [
+    [ViaLocation.passThrough()],
+    [ViaLocation.passThrough(...ids(11))],
+    [ViaLocation.visit(Location.stop('1:V'), -1)],
+    [ViaLocation.visit(Location.stop('1:V'), 86_401)],
+    [ViaLocation.passThrough('1:V'), ViaLocation.passThrough()],
+  ]) {
+    const result = await plan(via);
+    assert.equal(result.isSuccess, false);
+    if (!result.isSuccess) {
+      assert.equal(result.error.code, 'bad_request');
+      assert.equal(result.error.field, 'via');
+      assert.equal(result.error.message, 'via is out of range');
+    }
+  }
+  assert.equal(mock.calls.length, 0);
+
+  const ok = await plan([ViaLocation.passThrough(...ids(10)), ViaLocation.visit(Location.stop('1:V'), 86_400)]);
+  assert.equal(ok.isSuccess, true);
+  assert.deepEqual(JSON.parse(mock.calls[0].body).variables.via[1], { visit: { stopLocationIds: ['1:V'], minimumWaitTime: 'PT86400S' } });
+});
+
+test('plan sends the search window as given, without widening it', async () => {
+  const mock = mockFetch({ json: PLAN_ENVELOPE });
+  const client = new SpiderClient('https://x', 'k', { fetch: mock.fetch });
+  await client.routing.plan({ origin: Location.stop('1:A'), destination: Location.stop('1:B'), searchWindowMinutes: 0 });
+  assert.equal(JSON.parse(mock.calls[0].body).variables.searchWindow, 'PT0M');
 });
 
 test('plan maps modes, transfers, wheelchair, and search window to OTP inputs', async () => {

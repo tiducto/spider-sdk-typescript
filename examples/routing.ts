@@ -220,13 +220,16 @@ export async function planWithErrorHandling(client: SpiderClient) {
   switch (result.error.code) {
     case 'unauthorized':
       if (result.error.serverCode === 'persisted_query_rejected') {
-        console.error('This app version is too old for the API — prompt the user to update')
+        console.error('This environment does not recognise the query')
       } else {
         console.error('Bad or missing apikey — it is scoped to one project + environment')
       }
       break
+    case 'query_retired':
+      console.error('The API no longer serves this query')
+      break
     case 'bad_request':
-      // A server validation failure: over-cap searchWindow, bad via, or a missing required field.
+      // An invalid or missing value, caught by the SDK or rejected by the server; `field` names it.
       console.error(`Invalid request on ${result.error.field ?? 'input'}: ${result.error.message}`)
       break
     case 'rate_limited':
@@ -261,8 +264,8 @@ export async function streamTrip(client: SpiderClient) {
     origin: Location.coordinate(49.1951, 16.6068),
     destination: Location.coordinate(49.2246, 16.5747),
     departAt: new Date(),
-    targetResults: 5,       // soft floor: keep sweeping until at least this many are found
-    maxWindowMinutes: 180,  // cap the forward sweep
+    targetResults: 5,       // required: keep sweeping until at least this many are found
+    maxWindowMinutes: 180,  // required: how far the sweep may search, at least 120
   })) {
     switch (event.type) {
       case 'result':

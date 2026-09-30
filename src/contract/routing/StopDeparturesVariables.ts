@@ -1,6 +1,6 @@
 export interface StopDeparturesVariables {
   id: string;
-  numberOfDepartures?: number;
+  numberOfDepartures: number;
   startTime?: number;
-  timeRange?: number;
+  timeRange: number;
 }

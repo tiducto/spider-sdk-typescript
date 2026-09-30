@@ -2,8 +2,8 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Tiducto Transit API — Stops",
-    "version": "5.0",
-    "description": "Stop text/geo search — a plain-REST customer surface (key-auth). Companion to routing and realtime; the three share one pack version. Enum-ish fields are bare strings so unrecognized values pass through unchanged."
+    "version": "0.7",
+    "description": "Stop text/geo search — a plain-REST customer surface (key-auth). Companion to routing and realtime; the three share one pack version. `locationType` and `wheelchairBoarding` are GTFS integer codes, not enums, so an unrecognized code passes through unchanged."
   },
   "servers": [
     {
@@ -35,8 +35,12 @@
                 "$ref": "#/components/schemas/StopSearchRequest"
               },
               "example": {
-                "q": "central",
-                "filter": ""
+                "q": "",
+                "filter": "_geoRadius(49.1951, 16.6068, 500)",
+                "sort": [
+                  "_geoPoint(49.1951, 16.6068):asc"
+                ],
+                "limit": 10
               }
             }
           }
@@ -63,7 +67,7 @@
             }
           },
           "4XX": {
-            "description": "Stop-search error (e.g. filtering a non-filterable attribute).",
+            "description": "Stop-search error: a 400 whose message names the field when `limit` is missing, not an integer or out of range, or the body has a key it doesn't accept; or a search error such as filtering a non-filterable attribute.",
             "content": {
               "application/json": {
                 "schema": {
@@ -118,29 +122,31 @@
     "schemas": {
       "StopSearchRequest": {
         "type": "object",
-        "description": "POST body for /stops/search — transparently proxied to Meilisearch, so this IS a Meilisearch search body. `filter` and `sort` are Meilisearch expressions the client composes (not modeled shapes); the index is filterable on `gtfsId` and the admin-level fields, and filterable + sortable on `_geo`.",
+        "description": "POST body for `/stops/search`. The body accepts only `q`, `filter`, `sort` and `limit`; any other key is an HTTP 400 naming that key. `filter` and `sort` are search-index expressions the client composes (not modeled shapes). Filterable `StopHit` fields: `gtfsId`, the admin levels (`country`, `region`, `district`, `city`, `suburb`), `locationType`, `wheelchairBoarding` and `modes`; `_geo` (the stop's position) is filterable and sortable. The other `StopHit` fields (`name`, `code`, `lat`, `lon`) aren't filterable, and a filter on one of them fails with a `StopSearchError`. Filtering on an admin level the environment wasn't enriched with matches no stops rather than failing.",
         "properties": {
           "q": {
-            "type": "string"
+            "type": "string",
+            "description": "Search text, matched against the stop's `name`, its `code`, its town (`city`) and the district within the town (`suburb`); town and district only where the environment has them."
           },
           "filter": {
             "type": "string",
-            "description": "Meilisearch filter expression. Supports admin-level equality (e.g. `city = \"Brno\"`), by-id lookup (`gtfsId = \"1:39822\"`), radius (`_geoRadius(lat, lng, meters)`), and bounding box (`_geoBoundingBox([maxLat, maxLng], [minLat, minLng])`). Combine multiple with ` AND `."
+            "description": "Search filter expression. Supports admin-level equality (e.g. `city = \"Brno\"`), by-id lookup (`gtfsId = \"1:39822\"`), stop kind (`locationType = 1` for stations; `locationType != 1` for everything else, which also matches stops that omit the field), accessibility (`wheelchairBoarding = 1`), mode (`modes = RAIL` for stops a rail route serves), radius (`_geoRadius(lat, lng, meters)`), and bounding box (`_geoBoundingBox([maxLat, maxLng], [minLat, minLng])`). Combine multiple with ` AND `."
           },
           "sort": {
             "type": "array",
-            "description": "Meilisearch sort expressions, e.g. [\"_geoPoint(lat, lng):asc\"] to order by distance (nearest-stop). Requires _geo (present).",
+            "description": "Sort expressions, e.g. [\"_geoPoint(lat, lng):asc\"] to order by distance (nearest-stop). Requires _geo (present).",
             "items": {
               "type": "string"
             }
           },
           "limit": {
             "type": "integer",
-            "description": "Max hits to return."
+            "description": "Max hits to return, an integer from 1 to 50. A missing, non-integer or out-of-range value is an HTTP 400 naming `limit`."
           }
         },
         "required": [
-          "q"
+          "q",
+          "limit"
         ]
       },
       "StopSearchResponse": {
@@ -163,13 +169,35 @@
       },
       "StopHit": {
         "type": "object",
-        "description": "One indexed stop document. Field names must match the stops_env_{envId} index builder (seed-stops.sh). Admin levels and coordinates are populated only where the deployment enriched them.",
+        "description": "One stop. A station's platforms are folded into it, so the station is returned instead of its platforms. Admin levels are populated only where the deployment enriched them; the other optional fields are absent when the feed doesn't provide them. A hit can carry further fields not listed here; they aren't part of the contract and may change or disappear, so ignore them.",
         "properties": {
           "gtfsId": {
-            "type": "string"
+            "type": "string",
+            "description": "Feed-prefixed stop id (`<feedId>:<id>`), the same id routing's `gtfsId` carries."
           },
           "name": {
             "type": "string"
+          },
+          "code": {
+            "type": "string",
+            "description": "Short public code riders know the stop by, as the feed gives it (GTFS `stop_code`), e.g. the one printed on its sign."
+          },
+          "locationType": {
+            "type": "integer",
+            "format": "int32",
+            "description": "GTFS `location_type`: `0` a stop or platform, `1` a station (its platforms folded into it). Absent when the feed doesn't set it, which means a stop. No other values are returned."
+          },
+          "wheelchairBoarding": {
+            "type": "integer",
+            "format": "int32",
+            "description": "GTFS `wheelchair_boarding`: `1` some vehicles here can be boarded by a rider in a wheelchair, `2` wheelchair boarding isn't possible here, `0` no information. A station's value is the station's own; its platforms' values aren't combined into it. Absent when the feed doesn't set it, which also means no information. Any other value is passed through from the feed unchanged; treat it as no information."
+          },
+          "modes": {
+            "type": "array",
+            "description": "Modes of the routes serving the stop, each once, sorted: the mode names routing returns for those routes (e.g. `BUS`, `TRAM`, `RAIL`). A station's modes cover all its platforms. Absent when no route serves the stop.",
+            "items": {
+              "type": "string"
+            }
           },
           "lat": {
             "type": "number"

@@ -1,12 +1,13 @@
 import type { RealtimeState } from './RealtimeState.ts';
-import type { StopDeparturesTrip } from './StopDeparturesTrip.ts';
+import type { TripStop } from './TripStop.ts';
 
 export interface Stoptime {
   serviceDay?: number;
+  scheduledArrival?: number;
   scheduledDeparture?: number;
+  realtimeArrival?: number;
   realtimeDeparture?: number;
   realtime?: boolean;
   realtimeState?: RealtimeState;
-  headsign?: string;
-  trip?: StopDeparturesTrip;
+  stop?: TripStop;
 }

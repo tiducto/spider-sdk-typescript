@@ -2,9 +2,18 @@ import type { Transport } from './http.ts';
 import type { SpiderResult } from './result.ts';
 import { failure, success } from './result.ts';
 import type { SpiderError } from './errors.ts';
-import { DecodingError, TransportError, parseErrorEnvelope, toSpiderError } from './errors.ts';
-import type { BikesAllowed, TransitMode, WheelchairBoarding } from './enums.ts';
-import { bikesAllowedFromWire, transitModeFromWire, wheelchairFromWire } from './enums.ts';
+import { DecodingError, TransportError, badRequest, httpFailure, toSpiderError } from './errors.ts';
+import { graphqlFailure } from './http.ts';
+import type { GraphQLError } from './http.ts';
+import type { BikesAllowed, InputField, RealtimeState, RoutingErrorCode, TransitMode, WheelchairBoarding } from './enums.ts';
+import {
+  bikesAllowedFromWire,
+  inputFieldFromWire,
+  realtimeStateFromWire,
+  routingErrorCodeFromWire,
+  transitModeFromWire,
+  wheelchairFromWire,
+} from './enums.ts';
 import type { Location, ViaLocation } from './location.ts';
 import { decodePolyline } from './polyline.ts';
 import { invalidServiceDate, serviceDateOf } from './serviceDate.ts';
@@ -15,16 +24,13 @@ import type {
   PlanConnectionVariables,
   PlanModesInput,
   PlanPreferencesInput,
-  RoutingErrorCode,
-  InputField,
   Itinerary as ItineraryWire,
   Leg as LegWire,
   PlanLabeledLocationInput,
   PlanViaLocationInput,
   StopDeparturesData as StopDeparturesDataWire,
   StopDeparturesVariables,
-  StopDeparturesStop as DeparturesStopWire,
-  RealtimeState,
+  StopDeparturesStop2 as DeparturesStopWire,
   RoutingError as RoutingErrorWire,
   TransitMode as WireTransitMode,
   TripData as TripDataWire,
@@ -94,6 +100,10 @@ export interface RoutePageInfo {
 export interface RoutingError {
   readonly code: RoutingErrorCode;
   readonly description: string;
+  /**
+   * The input the error is about, when there is one. A `LOCATION_NOT_FOUND` names `FROM` (origin), `TO`
+   * (destination) or `VIA` (a via stop id the environment doesn't know).
+   */
   readonly inputField: InputField | null;
 }
 
@@ -179,11 +189,11 @@ export interface PlanOptions {
   readonly via?: readonly ViaLocation[];
   /** Restrict routing to these transit modes. Undefined/empty = no filter (all modes); WALK/UNKNOWN drop out. */
   readonly allowedTransitModes?: readonly TransitMode[];
-  /** Absolute cap on transfers in any returned itinerary. Undefined = OTP default. */
+  /** Most transfers in any itinerary (0 = direct only), up to the environment's limit. Undefined = that limit. */
   readonly maxTransfers?: number;
   /**
-   * Search window in minutes (default 60). Always sent, deliberately not OTP's dynamic route-dependent
-   * window — predictable cost + paging. Widen for sparse/intercity routes.
+   * Search window in minutes (default 60), up to the environment's limit. Always sent, deliberately not a
+   * dynamic route-dependent window — predictable cost + paging. Widen for sparse/intercity routes.
    */
   readonly searchWindowMinutes?: number;
   /** Prefer wheelchair-accessible routing. */
@@ -204,21 +214,32 @@ export interface PlanStreamRequestOptions {
   readonly allowedTransitModes?: readonly TransitMode[];
   readonly maxTransfers?: number;
   readonly wheelchairAccessible?: boolean;
-  /** Soft floor: the router keeps sweeping until at least this many itineraries are found (default 5). */
-  readonly targetResults?: number;
-  /** Cap on how far forward the sweep searches, in minutes. Undefined = the router's default cap. */
-  readonly maxWindowMinutes?: number;
+  /**
+   * Soft floor: the sweep keeps going until at least this many itineraries are found. From 1 up to the
+   * environment's result count.
+   */
+  readonly targetResults: number;
+  /**
+   * How far the sweep may search, in minutes: at least 120 (2 h), up to the environment's search-window limit.
+   * A smaller value fails as `bad_request` on `maxWindow` before any request.
+   */
+  readonly maxWindowMinutes: number;
 }
 
 export interface DeparturesOptions {
+  /** Departures from this time on (default now). */
   readonly startTime?: number | Date;
+  /** How far ahead to look, in seconds: above 0, up to 86400 (24 h, the default). */
   readonly timeRangeSeconds?: number;
 }
 
 const DEFAULT_SEARCH_WINDOW_MINUTES = 60;
-const DEFAULT_STREAM_TARGET_RESULTS = 5;
-const DEFAULT_TIME_RANGE_SECONDS = 24 * 60 * 60;
-const INT_MAX = 2_147_483_647;
+const DEFAULT_NUMBER_OF_DEPARTURES = 30;
+const MAX_TIME_RANGE_SECONDS = 24 * 60 * 60;
+// Fixed platform limits; the env-set ones (search window, result count, via count) are the server's to check.
+const MIN_STREAM_WINDOW_MINUTES = 120;
+const MAX_VIA_STOP_IDS = 10;
+const MAX_VIA_WAIT_SECONDS = 24 * 60 * 60;
 
 // The OTP transit modes valid in a modes filter — the public TransitMode union also carries street/leg
 // values (WALK, BICYCLE, CAR, TRANSIT, UNKNOWN) that are not transit modes and must not reach the wire.
@@ -267,6 +288,8 @@ export class SpiderRouting {
       searchWindowMinutes: options.searchWindowMinutes ?? DEFAULT_SEARCH_WINDOW_MINUTES,
       wheelchairAccessible: options.wheelchairAccessible ?? false,
     };
+    const invalid = invalidVia(request.via);
+    if (invalid != null) return failure(invalid);
     return this.page(request);
   }
 
@@ -278,13 +301,13 @@ export class SpiderRouting {
    * {@link RoutePageInfo} and any `routingErrors` (or a terminal `failure`). Never throws — transport, HTTP and
    * request errors surface as a `failure` event.
    *
-   * `targetResults` is a soft floor the sweep aims to reach; `maxWindowMinutes` caps how far forward it
-   * searches. This opens a fresh stream; to continue, call {@link planStreamNext} with `done.pageInfo.endCursor`
-   * (when `hasNextPage`) or {@link planStreamPrevious} with `done.pageInfo.startCursor` (when `hasPreviousPage`).
-   * For a single batched page instead, use {@link plan}.
+   * `targetResults` (a soft floor the sweep aims to reach) and `maxWindowMinutes` (how far it may search, at
+   * least 2 h) are required. This opens a fresh stream; to continue, call {@link planStreamNext} with
+   * `done.pageInfo.endCursor` (when `hasNextPage`) or {@link planStreamPrevious} with `done.pageInfo.startCursor`
+   * (when `hasPreviousPage`). For a single batched page instead, use {@link plan}.
    */
   async *planStream(options: PlanStreamRequestOptions): AsyncGenerator<PlanStreamEvent> {
-    yield* this.openPlanStream(this.streamVariables(options));
+    yield* this.openPlanStream(options);
   }
 
   /**
@@ -293,7 +316,7 @@ export class SpiderRouting {
    * Call only when the prior `done.pageInfo.hasNextPage` was true.
    */
   async *planStreamNext(options: PlanStreamRequestOptions, after: string): AsyncGenerator<PlanStreamEvent> {
-    yield* this.openPlanStream(this.streamVariables(options, { after }));
+    yield* this.openPlanStream(options, { after });
   }
 
   /**
@@ -301,15 +324,12 @@ export class SpiderRouting {
    * {@link planStream} plus the raw cursor. Call only when the prior `done.pageInfo.hasPreviousPage` was true.
    */
   async *planStreamPrevious(options: PlanStreamRequestOptions, before: string): AsyncGenerator<PlanStreamEvent> {
-    yield* this.openPlanStream(this.streamVariables(options, { before }));
+    yield* this.openPlanStream(options, { before });
   }
 
   // Builds the SSE request variables from the public options plus an optional raw continuation cursor. Forward
   // paging sets `after`, backward sets `before`; an initial stream sets neither.
-  private streamVariables(
-    options: PlanStreamRequestOptions,
-    cursor?: { readonly after?: string; readonly before?: string },
-  ): PlanConnectionStreamVariables {
+  private streamVariables(options: PlanStreamRequestOptions, cursor?: StreamCursor): PlanConnectionStreamVariables {
     const time: RouteTimeSpec = options.arriveBy != null
       ? { kind: 'arriveBy', epochMs: toEpochMs(options.arriveBy) }
       : { kind: 'departAt', epochMs: toEpochMs(options.departAt ?? Date.now()) };
@@ -325,31 +345,32 @@ export class SpiderRouting {
         maxTransfers: options.maxTransfers,
         wheelchairAccessible: options.wheelchairAccessible ?? false,
       }),
-      targetResults: options.targetResults ?? DEFAULT_STREAM_TARGET_RESULTS,
-      maxWindow: options.maxWindowMinutes != null ? `PT${Math.max(1, Math.floor(options.maxWindowMinutes))}M` : undefined,
+      targetResults: options.targetResults,
+      maxWindow: `PT${Math.floor(options.maxWindowMinutes)}M`,
       before: cursor?.before,
       after: cursor?.after,
     };
   }
 
   // Opens the SSE `plan-stream` request and turns its `chunk`/`pageInfo`/`done`/`error` records into a
-  // PlanStreamEvent stream. A non-2xx response, a transport error, or a decoding slip becomes a terminal
-  // `failure` event rather than a throw. Reading stops when the server closes the stream or the consumer
-  // stops iterating (which cancels the reader → aborts the request).
-  private async *openPlanStream(variables: PlanConnectionStreamVariables): AsyncGenerator<PlanStreamEvent> {
+  // PlanStreamEvent stream. Invalid options, a non-2xx response, a transport error, or a decoding slip becomes a
+  // terminal `failure` event rather than a throw. Reading stops when the server closes the stream or the
+  // consumer stops iterating (which cancels the reader → aborts the request).
+  private async *openPlanStream(options: PlanStreamRequestOptions, cursor?: StreamCursor): AsyncGenerator<PlanStreamEvent> {
+    const invalid = invalidStreamOptions(options);
+    if (invalid != null) {
+      yield { type: 'failure', error: invalid };
+      return;
+    }
     let response: Response;
     try {
-      response = await this.transport.stream(PLAN_STREAM, variables);
+      response = await this.transport.stream(PLAN_STREAM, this.streamVariables(options, cursor));
     } catch (e) {
       yield { type: 'failure', error: toSpiderError(e) };
       return;
     }
     if (!response.ok) {
-      const text = await drainText(response);
-      const env = parseErrorEnvelope(text);
-      const detail = env.message ?? text.slice(0, 300);
-      const err = new TransportError('http', `routing plan-stream -> ${response.status}: ${detail}`, response.status, env.code);
-      yield { type: 'failure', error: toSpiderError(err) };
+      yield { type: 'failure', error: toSpiderError(httpFailure('routing plan-stream', response.status, await drainText(response))) };
       return;
     }
     const body = response.body;
@@ -360,11 +381,19 @@ export class SpiderRouting {
     const reader = body.getReader();
     const decoder = new TextDecoder();
     let buffer = '';
+    // The gateway answers some rejections (e.g. a missing required variable) with a 2xx GraphQL JSON body
+    // before any event, so a body that opens with `{` is read whole and mapped like a batch response.
+    let json: boolean | undefined = (response.headers.get('content-type') ?? '').includes('json') ? true : undefined;
     try {
       for (;;) {
         const { value, done } = await reader.read();
         if (done) break;
         buffer = (buffer + decoder.decode(value, { stream: true })).replace(/\r\n/g, '\n');
+        if (json === undefined) {
+          const head = buffer.trimStart();
+          if (head !== '') json = head.startsWith('{');
+        }
+        if (json !== false) continue;
         // SSE records are separated by a blank line; parse every complete one and keep the remainder buffered.
         let boundary: number;
         while ((boundary = buffer.indexOf('\n\n')) !== -1) {
@@ -373,6 +402,10 @@ export class SpiderRouting {
           const event = parsePlanStreamRecord(record.event, record.data);
           if (event != null) yield event;
         }
+      }
+      if (json === true) {
+        yield { type: 'failure', error: streamErrorToSpiderError(buffer) };
+        return;
       }
       // A trailing record the server didn't terminate with a blank line before closing.
       const record = parseSseFrame(buffer);
@@ -397,17 +430,23 @@ export class SpiderRouting {
     return this.page(requestOf(route), route.pageInfo.startCursor ?? undefined, undefined);
   }
 
+  /**
+   * Upcoming departures from a stop or station: `numberOfDepartures` (default 30, up to the environment's
+   * limit) within `options.timeRangeSeconds` (default 24 h) from `options.startTime` (default now).
+   */
   async departures(
     stopId: string,
-    numberOfDepartures = 30,
+    numberOfDepartures = DEFAULT_NUMBER_OF_DEPARTURES,
     options?: DeparturesOptions,
   ): Promise<SpiderResult<Departure[]>> {
+    const timeRange = Math.floor(options?.timeRangeSeconds ?? MAX_TIME_RANGE_SECONDS);
+    if (!(timeRange > 0 && timeRange <= MAX_TIME_RANGE_SECONDS)) return failure(badRequest('timeRange'));
     try {
       const variables: StopDeparturesVariables = {
         id: stopId,
         numberOfDepartures,
         startTime: options?.startTime != null ? Math.floor(toEpochMs(options.startTime) / 1000) : undefined,
-        timeRange: clampSeconds(options?.timeRangeSeconds ?? DEFAULT_TIME_RANGE_SECONDS),
+        timeRange,
       };
       const data = await this.transport.graphql<StopDeparturesDataWire>(DEPARTURES, variables);
       const stop = data.asStop ?? data.asStation;
@@ -465,8 +504,7 @@ export class SpiderRouting {
       via: request.via.length > 0 ? request.via.map(viaToInput) : undefined,
       modes: modesInput(request.allowedTransitModes),
       preferences: preferencesInput(request),
-      // Floor to a whole minute, min 1 — a sub-minute window returns almost nothing on OTP.
-      searchWindow: `PT${Math.max(1, Math.floor(request.searchWindowMinutes))}M`,
+      searchWindow: `PT${Math.floor(request.searchWindowMinutes)}M`,
       before,
       after,
     };
@@ -499,8 +537,23 @@ function toEpochMs(value: number | Date): number {
   return typeof value === 'number' ? value : value.getTime();
 }
 
-function clampSeconds(seconds: number): number {
-  return Math.max(0, Math.min(Math.floor(seconds), INT_MAX));
+type StreamCursor = { readonly after?: string; readonly before?: string };
+
+function invalidStreamOptions(options: PlanStreamRequestOptions): SpiderError | null {
+  // Required by the type; a plain-JS caller can still omit it, and `PTNaNM` must never reach the wire.
+  if (options.maxWindowMinutes == null) return badRequest('maxWindow', 'is required');
+  if (!(Math.floor(options.maxWindowMinutes) >= MIN_STREAM_WINDOW_MINUTES)) return badRequest('maxWindow');
+  return invalidVia(options.via ?? []);
+}
+
+function invalidVia(via: readonly ViaLocation[]): SpiderError | null {
+  for (const v of via) {
+    const valid = v.kind === 'passThrough'
+      ? v.stopIds.length >= 1 && v.stopIds.length <= MAX_VIA_STOP_IDS
+      : v.minimumWaitSeconds >= 0 && v.minimumWaitSeconds <= MAX_VIA_WAIT_SECONDS;
+    if (!valid) return badRequest('via');
+  }
+  return null;
 }
 
 function locationToInput(location: Location): PlanLabeledLocationInput {
@@ -530,8 +583,8 @@ function viaToInput(via: ViaLocation): PlanViaLocationInput {
 // else stays undefined so OTP applies its own defaults. Both return undefined when nothing is requested.
 function modesInput(modes: readonly TransitMode[]): PlanModesInput | undefined {
   const transit = modes
-    .filter((m): m is WireTransitMode => WIRE_TRANSIT_MODES.has(m))
-    .map((mode) => ({ mode }));
+    .filter((m) => WIRE_TRANSIT_MODES.has(m))
+    .map((mode) => ({ mode: mode as WireTransitMode }));
   return transit.length > 0 ? { transit: { transit } } : undefined;
 }
 
@@ -620,24 +673,19 @@ function parseSseFrame(record: string): { event: string; data: string } {
   return { event, data: data.join('\n') };
 }
 
-// A stream `error` record is the same GraphQL error envelope the batch path returns, so it maps through the
-// same taxonomy — a top-level BAD_REQUEST becomes a typed bad_request (with its field), anything else server.
+// A stream `error` record (or a 2xx JSON body in place of the stream) is the same GraphQL error envelope the
+// batch path returns, so it maps through the same taxonomy: a BAD_REQUEST becomes bad_request with its field.
 function streamErrorToSpiderError(data: string): SpiderError {
-  let env: { errors?: StreamGraphQLError[]; message?: string };
+  let env: { errors?: GraphQLError[]; message?: string };
   try {
-    env = JSON.parse(data) as { errors?: StreamGraphQLError[]; message?: string };
+    env = JSON.parse(data) as { errors?: GraphQLError[]; message?: string };
   } catch {
-    return toSpiderError(new TransportError('upstream', `plan-stream error: ${data.slice(0, 300)}`));
+    return toSpiderError(new TransportError('upstream', `routing plan-stream error: ${data.slice(0, 300)}`));
   }
-  const errors = env.errors;
-  if (errors != null && errors.length > 0) {
-    const bad = errors.find((e) => e.extensions?.code === 'BAD_REQUEST');
-    if (bad != null) {
-      return toSpiderError(new TransportError('bad_request', bad.message, undefined, undefined, bad.extensions?.field));
-    }
-    return toSpiderError(new TransportError('upstream', `plan-stream errors: ${errors.map((e) => e.message).join(', ')}`));
+  if (env.errors != null && env.errors.length > 0) {
+    return toSpiderError(graphqlFailure('routing plan-stream', env.errors));
   }
-  return toSpiderError(new TransportError('upstream', `plan-stream error: ${env.message ?? data.slice(0, 300)}`));
+  return toSpiderError(new TransportError('upstream', `routing plan-stream error: ${env.message ?? data.slice(0, 300)}`));
 }
 
 async function drainText(response: Response): Promise<string> {
@@ -661,13 +709,8 @@ interface StreamPageInfoWire {
   routingErrors?: RoutingErrorWire[];
 }
 
-interface StreamGraphQLError {
-  message: string;
-  extensions?: { code?: string; field?: string } | null;
-}
-
 function mapRoutingError(re: RoutingErrorWire): RoutingError {
-  return { code: re.code, description: re.description, inputField: re.inputField ?? null };
+  return { code: routingErrorCodeFromWire(re.code), description: re.description, inputField: inputFieldFromWire(re.inputField) };
 }
 
 function mapItinerary(node: ItineraryWire): Itinerary {
@@ -692,7 +735,7 @@ function mapLeg(leg: LegWire): Leg {
     startDelaySeconds: durationSecondsFromWire(leg.start.estimated?.delay),
     endDelaySeconds: durationSecondsFromWire(leg.end.estimated?.delay),
     isRealtime: leg.realTime ?? false,
-    realtimeState: leg.realtimeState ?? null,
+    realtimeState: realtimeStateFromWire(leg.realtimeState),
     serviceDate: leg.serviceDate ?? null,
     fromName: leg.from.name ?? null,
     toName: leg.to.name ?? null,
@@ -721,7 +764,7 @@ function mapDepartures(stop: DeparturesStopWire): Departure[] {
       scheduledTimeEpochMs: (serviceDay + scheduledOffset) * 1000,
       realtimeTimeEpochMs: st.realtimeDeparture != null ? (serviceDay + st.realtimeDeparture) * 1000 : null,
       isRealtime: st.realtime ?? false,
-      realtimeState: st.realtimeState ?? null,
+      realtimeState: realtimeStateFromWire(st.realtimeState),
       headsign: st.headsign ?? null,
       tripGtfsId: st.trip?.gtfsId ?? null,
       serviceDate: serviceDateOf(serviceDay),

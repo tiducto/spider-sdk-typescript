@@ -1,6 +1,6 @@
 import { CONTRACT_HEADER, CONTRACT_VERSION } from './contract.ts';
 import { SDK_HEADER, SDK_IDENTITY } from './sdk.ts';
-import { DecodingError, TransportError, parseErrorEnvelope } from './errors.ts';
+import { DecodingError, TransportError, httpFailure } from './errors.ts';
 
 export type FetchLike = typeof fetch;
 
@@ -32,14 +32,23 @@ export interface RawResponse {
   readonly text: string;
 }
 
-interface GraphQLError {
+export interface GraphQLError {
   message: string;
   extensions?: { code?: string; field?: string } | null;
 }
 
-interface GraphQLEnvelope<D> {
+export interface GraphQLEnvelope<D> {
   data?: D | null;
   errors?: ReadonlyArray<GraphQLError> | null;
+}
+
+/** A GraphQL `errors` array → a typed bad_request for a BAD_REQUEST extension (with its field), else upstream. */
+export function graphqlFailure(where: string, errors: ReadonlyArray<GraphQLError>): TransportError {
+  const bad = errors.find((e) => e.extensions?.code === 'BAD_REQUEST');
+  if (bad != null) {
+    return new TransportError('bad_request', bad.message, undefined, undefined, bad.extensions?.field);
+  }
+  return new TransportError('upstream', `${where} errors: ${errors.map((e) => e.message).join(', ')}`);
 }
 
 export function parseJson<T>(text: string, where: string): T {
@@ -75,19 +84,10 @@ export class Transport {
       body: JSON.stringify({ id: op.id, variables }),
     });
     const text = await res.text();
-    if (!res.ok) {
-      const env = parseErrorEnvelope(text);
-      const detail = env.message ?? text.slice(0, 300);
-      throw new TransportError('http', `routing ${op.path} -> ${res.status}: ${detail}`, res.status, env.code);
-    }
+    if (!res.ok) throw httpFailure(`routing ${op.path}`, res.status, text);
     const envelope = parseJson<GraphQLEnvelope<D>>(text, `routing ${op.path}`);
     if (envelope.errors != null && envelope.errors.length > 0) {
-      // A BAD_REQUEST extension → typed bad_request; anything else stays a generic upstream (→ server).
-      const bad = envelope.errors.find((e) => e.extensions?.code === 'BAD_REQUEST');
-      if (bad != null) {
-        throw new TransportError('bad_request', bad.message, undefined, undefined, bad.extensions?.field);
-      }
-      throw new TransportError('upstream', `routing ${op.path} errors: ${envelope.errors.map((e) => e.message).join(', ')}`);
+      throw graphqlFailure(`routing ${op.path}`, envelope.errors);
     }
     if (envelope.data == null) {
       throw new TransportError('no_data', `routing ${op.path} returned no data`);
@@ -102,11 +102,7 @@ export class Transport {
       body: JSON.stringify(body),
     });
     const text = await res.text();
-    if (!res.ok) {
-      const env = parseErrorEnvelope(text);
-      const message = errorMessage ? errorMessage(text) : (env.message ?? text.slice(0, 300));
-      throw new TransportError('http', `POST ${path} -> ${res.status}: ${message}`, res.status, env.code);
-    }
+    if (!res.ok) throw httpFailure(`POST ${path}`, res.status, text, errorMessage?.(text));
     return parseJson<D>(text, `POST ${path}`);
   }
 
@@ -136,11 +132,7 @@ export class Transport {
 
   async getJson<D>(path: string, query?: Record<string, string>): Promise<D> {
     const raw = await this.getRaw(path, query);
-    if (!raw.ok) {
-      const env = parseErrorEnvelope(raw.text);
-      const detail = env.message ?? raw.text.slice(0, 300);
-      throw new TransportError('http', `GET ${path} -> ${raw.status}: ${detail}`, raw.status, env.code);
-    }
+    if (!raw.ok) throw httpFailure(`GET ${path}`, raw.status, raw.text);
     return parseJson<D>(raw.text, `GET ${path}`);
   }
 

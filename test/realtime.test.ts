@@ -128,3 +128,39 @@ test('alerts maps text and active periods', async () => {
   assert.equal(result.data.alerts[0].headerText, 'H');
   assert.equal(result.data.alerts[0].activePeriods[0].startEpochMs, 1000);
 });
+
+test('vehicles and delays reject more than 50 trip ids, counted across dates, without a request', async () => {
+  const mock = mockFetch({ json: { vehicles: [], results: [] } });
+  const client = new SpiderClient('https://x', 'k', { fetch: mock.fetch });
+  const ids = (n: number, p = 't') => Array.from({ length: n }, (_, i) => `${p}${i}`);
+
+  const results = [
+    await client.realtime.vehicles(ids(51)),
+    await client.realtime.delays(ids(51), '2026-07-19'),
+    await client.realtime.delays({ '2026-07-19': ids(30, 'a'), '2026-07-20': ids(21, 'b') }),
+  ];
+  for (const result of results) {
+    assert.equal(result.isSuccess, false);
+    if (!result.isSuccess) {
+      assert.equal(result.error.code, 'bad_request');
+      assert.equal(result.error.field, 'tripIds');
+      assert.equal(result.error.message, 'tripIds is out of range');
+    }
+  }
+  assert.equal(mock.calls.length, 0);
+
+  await client.realtime.vehicles(ids(50));
+  await client.realtime.delays({ '2026-07-19': ids(30, 'a'), '2026-07-20': ids(20, 'b') });
+  assert.equal(mock.calls.length, 2);
+});
+
+test('a realtime 400 naming a field is bad_request on that field', async () => {
+  const mock = mockFetch({ status: 400, text: 'tripIds is out of range' });
+  const client = new SpiderClient('https://x', 'k', { fetch: mock.fetch });
+  const result = await client.realtime.vehicles(['t1']);
+  assert.equal(result.isSuccess, false);
+  if (!result.isSuccess) {
+    assert.equal(result.error.code, 'bad_request');
+    assert.equal(result.error.field, 'tripIds');
+  }
+});

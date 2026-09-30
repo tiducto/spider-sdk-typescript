@@ -1,11 +1,18 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { Location, SpiderClient, ViaLocation } from '../src/index.ts';
-import type { PlanStreamEvent } from '../src/index.ts';
+import type { PlanStreamEvent, PlanStreamRequestOptions } from '../src/index.ts';
 import { parsePlanStreamRecord } from '../src/routing.ts';
 import { PLAN_STREAM } from '../src/persistedQueries.ts';
 import type { FetchLike } from '../src/http.ts';
 import type { Captured } from './support.ts';
+
+const STREAM_OPTIONS: PlanStreamRequestOptions = {
+  origin: Location.stop('1:A'),
+  destination: Location.stop('1:B'),
+  targetResults: 5,
+  maxWindowMinutes: 180,
+};
 
 // Guards the SSE `plan-stream` handling: the record parser that turns `chunk`/`pageInfo`/`error` frames into
 // the three PlanStreamEvents (`result`/`done`/`failure`, including realtime-delay mapping onto legs), and the
@@ -103,13 +110,13 @@ test('done frame is dropped', () => {
 
 // A stream `error` record is the GraphQL error envelope; a top-level BAD_REQUEST becomes a typed bad_request.
 test('error event maps to a typed bad_request failure', () => {
-  const data = JSON.stringify({ data: null, errors: [{ message: 'searchWindow exceeds the cap', extensions: { code: 'BAD_REQUEST', field: 'searchWindow' } }] });
+  const data = JSON.stringify({ data: null, errors: [{ message: 'searchWindow is out of range', extensions: { code: 'BAD_REQUEST', field: 'searchWindow' } }] });
   const event = parsePlanStreamRecord('error', data);
   assert.equal(event?.type, 'failure');
   if (event?.type !== 'failure') return;
   assert.equal(event.error.code, 'bad_request');
   assert.equal(event.error.field, 'searchWindow');
-  assert.equal(event.error.message, 'searchWindow exceeds the cap');
+  assert.equal(event.error.message, 'searchWindow is out of range');
 });
 
 test('heartbeats and unknown events are ignored', () => {
@@ -195,10 +202,7 @@ test('planStreamPrevious continues backward from a done startCursor via before',
   const client = new SpiderClient('https://brno.api.tiducto.eu', 'k', { fetch: mock.fetch });
 
   const events: PlanStreamEvent[] = [];
-  for await (const ev of client.routing.planStreamPrevious(
-    { origin: Location.stop('1:A'), destination: Location.stop('1:B') },
-    'cursor-start',
-  )) {
+  for await (const ev of client.routing.planStreamPrevious(STREAM_OPTIONS, 'cursor-start')) {
     events.push(ev);
   }
 
@@ -209,36 +213,80 @@ test('planStreamPrevious continues backward from a done startCursor via before',
   assert.deepEqual(events.map((e) => e.type), ['done']);
 });
 
-// No SDK-side window: without maxWindowMinutes the router's own default cap applies.
-test('planStream with default options sends no maxWindow', async () => {
+test('planStream rejects a maxWindow under 2 h, or none, before any request', async () => {
   const mock = sseFetch(['event: pageInfo\ndata: {"hasNextPage":false,"hasPreviousPage":false}\n\n']);
   const client = new SpiderClient('https://x', 'k', { fetch: mock.fetch });
 
-  for await (const ev of client.routing.planStream({ origin: Location.stop('1:A'), destination: Location.stop('1:B') })) {
-    void ev;
+  const cases: [PlanStreamRequestOptions, string][] = [
+    [{ ...STREAM_OPTIONS, maxWindowMinutes: 119 }, 'maxWindow is out of range'],
+    [{ ...STREAM_OPTIONS, maxWindowMinutes: Number.NaN }, 'maxWindow is out of range'],
+    // A plain-JS caller can leave out a required option.
+    [{ ...STREAM_OPTIONS, maxWindowMinutes: undefined as unknown as number }, 'maxWindow is required'],
+  ];
+  for (const [options, message] of cases) {
+    const events = await collect(client.routing.planStream(options));
+    assert.equal(events.length, 1);
+    const ev = events[0];
+    assert.equal(ev.type === 'failure' && ev.error.code, 'bad_request');
+    assert.equal(ev.type === 'failure' && ev.error.field, 'maxWindow');
+    assert.equal(ev.type === 'failure' && ev.error.message, message);
   }
+  assert.equal(mock.calls.length, 0);
 
-  const body = JSON.parse(mock.calls[0].body);
-  assert.equal('maxWindow' in body.variables, false);
+  await collect(client.routing.planStream({ ...STREAM_OPTIONS, maxWindowMinutes: 120 }));
+  assert.equal(JSON.parse(mock.calls[0].body).variables.maxWindow, 'PT120M');
 });
 
-test('planStream surfaces a retired persisted-query id as an unauthorized failure that says to update the SDK', async () => {
+test('planStream and its continuations reject an out-of-range via before any request', async () => {
+  const mock = sseFetch([]);
+  const client = new SpiderClient('https://x', 'k', { fetch: mock.fetch });
+  const options = { ...STREAM_OPTIONS, via: [ViaLocation.passThrough()] };
+
+  for (const stream of [
+    client.routing.planStream(options),
+    client.routing.planStreamNext(options, 'c'),
+    client.routing.planStreamPrevious(options, 'c'),
+  ]) {
+    const [ev] = await collect(stream);
+    assert.equal(ev.type === 'failure' && ev.error.field, 'via');
+  }
+  assert.equal(mock.calls.length, 0);
+});
+
+// The gateway rejects a missing required variable with a 2xx GraphQL JSON body instead of an event stream.
+test('a 2xx JSON body in place of the stream maps like a batch BAD_REQUEST', async () => {
+  const body = JSON.stringify({ data: null, errors: [{ message: 'targetResults is required', extensions: { code: 'BAD_REQUEST', field: 'targetResults' } }] });
+  for (const headers of [{ 'content-type': 'application/json' }, undefined]) {
+    const fetch: FetchLike = async () => new Response(body, { status: 200, headers });
+    const client = new SpiderClient('https://x', 'k', { fetch });
+
+    const events = await collect(client.routing.planStream(STREAM_OPTIONS));
+
+    assert.equal(events.length, 1);
+    const ev = events[0];
+    assert.equal(ev.type, 'failure');
+    if (ev.type === 'failure') {
+      assert.equal(ev.error.code, 'bad_request');
+      assert.equal(ev.error.field, 'targetResults');
+      assert.equal(ev.error.message, 'targetResults is required');
+    }
+  }
+});
+
+test('planStream surfaces a retired persisted query as a query_retired failure', async () => {
   const fetch: FetchLike = async () =>
-    new Response(JSON.stringify({ error: 'persisted_query_rejected', message: `unknown persisted-query id: ${PLAN_STREAM.id}` }), { status: 403 });
+    new Response(JSON.stringify({ error: 'query_retired', message: 'persisted query is retired' }), { status: 410 });
   const client = new SpiderClient('https://x', 'k', { fetch });
 
-  const events: PlanStreamEvent[] = [];
-  for await (const ev of client.routing.planStream({ origin: Location.stop('1:A'), destination: Location.stop('1:B') })) {
-    events.push(ev);
-  }
+  const events = await collect(client.routing.planStream(STREAM_OPTIONS));
 
   assert.equal(events.length, 1);
   const ev = events[0];
   assert.equal(ev.type, 'failure');
   if (ev.type === 'failure') {
-    assert.equal(ev.error.code, 'unauthorized');
-    assert.equal(ev.error.serverCode, 'persisted_query_rejected');
-    assert.match(ev.error.message, /update the SDK/);
+    assert.equal(ev.error.code, 'query_retired');
+    assert.equal(ev.error.httpStatus, 410);
+    assert.equal(ev.error.message, 'persisted query is retired');
   }
 });
 
@@ -246,10 +294,7 @@ test('planStream surfaces a non-2xx response as a single failure event', async (
   const fetch: FetchLike = async () => new Response('forbidden', { status: 403 });
   const client = new SpiderClient('https://x', 'k', { fetch });
 
-  const events: PlanStreamEvent[] = [];
-  for await (const ev of client.routing.planStream({ origin: Location.stop('1:A'), destination: Location.stop('1:B') })) {
-    events.push(ev);
-  }
+  const events = await collect(client.routing.planStream(STREAM_OPTIONS));
 
   assert.equal(events.length, 1);
   assert.equal(events[0].type, 'failure');
@@ -257,6 +302,12 @@ test('planStream surfaces a non-2xx response as a single failure event', async (
   assert.equal(events[0].error.code, 'unauthorized');
   assert.equal(events[0].error.httpStatus, 403);
 });
+
+async function collect(stream: AsyncGenerator<PlanStreamEvent>): Promise<PlanStreamEvent[]> {
+  const events: PlanStreamEvent[] = [];
+  for await (const ev of stream) events.push(ev);
+  return events;
+}
 
 function sseFetch(frames: readonly string[]): { fetch: FetchLike; calls: Captured[] } {
   const calls: Captured[] = [];

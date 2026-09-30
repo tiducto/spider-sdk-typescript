@@ -3,7 +3,15 @@ export type { SpiderClientOptions, FetchLike, FeatureOptions, AutoRetryOptions }
 export type { SpiderResult } from './result.ts';
 export type { SpiderError, SpiderErrorCode } from './errors.ts';
 export { Location, ViaLocation } from './location.ts';
-export type { TransitMode, WheelchairBoarding, BikesAllowed, OccupancyStatus } from './enums.ts';
+export type {
+  TransitMode,
+  WheelchairBoarding,
+  BikesAllowed,
+  OccupancyStatus,
+  RealtimeState,
+  RoutingErrorCode,
+  InputField,
+} from './enums.ts';
 export { SpiderRouting } from './routing.ts';
 export type {
   Route,

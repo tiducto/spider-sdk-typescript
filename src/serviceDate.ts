@@ -1,4 +1,5 @@
 import type { SpiderError } from './errors.ts';
+import { badRequest } from './errors.ts';
 
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -14,9 +15,5 @@ export function invalidServiceDate(serviceDate: string): SpiderError | null {
     const ms = Date.parse(`${serviceDate}T00:00:00Z`);
     if (Number.isFinite(ms) && new Date(ms).toISOString().slice(0, 10) === serviceDate) return null;
   }
-  return {
-    code: 'bad_request',
-    message: `serviceDate must be an ISO YYYY-MM-DD date, got "${serviceDate}"`,
-    field: 'serviceDate',
-  };
+  return badRequest('serviceDate', 'is invalid');
 }
