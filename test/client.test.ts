@@ -54,7 +54,7 @@ test('warmup never rejects — a failing /ping still returns the elapsed time', 
 
 test('a plan-limit refusal reaches every surface as its own code', async () => {
   for (const [code, message] of [
-    ['search_limit_reached', 'search limit reached'],
+    ['planning_limit_reached', 'trip planning limit reached'],
     ['agreement_inactive', 'agreement is not active'],
   ] as const) {
     const mock = mockFetch({ status: 403, json: { error: code, message } });

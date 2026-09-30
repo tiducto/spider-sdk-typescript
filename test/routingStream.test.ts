@@ -299,7 +299,7 @@ test('planStream surfaces a retired persisted query as a query_retired failure',
 
 test('planStream surfaces a plan-limit 403 before the stream starts as a single failure with its code', async () => {
   for (const [code, message] of [
-    ['search_limit_reached', 'search limit reached'],
+    ['planning_limit_reached', 'trip planning limit reached'],
     ['agreement_inactive', 'agreement is not active'],
   ] as const) {
     const fetch: FetchLike = async () =>

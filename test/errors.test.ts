@@ -58,7 +58,7 @@ test('a query_retired body is query_retired with a message that states the state
 });
 
 for (const [code, message] of [
-  ['search_limit_reached', 'search limit reached'],
+  ['planning_limit_reached', 'trip planning limit reached'],
   ['agreement_inactive', 'agreement is not active'],
 ] as const) {
   test(`a 403 ${code} body is ${code} with the body message`, () => {
@@ -80,13 +80,13 @@ for (const [code, message] of [
 }
 
 test('a plan-limit error takes the body message, and the fixed wording only when the body has none', () => {
-  const custom = toSpiderError(httpFailure('routing plan', 403, '{"error":"search_limit_reached","message":"trial searches used"}'));
-  assert.equal(custom.code, 'search_limit_reached');
-  assert.equal(custom.message, 'trial searches used');
+  const custom = toSpiderError(httpFailure('routing plan', 403, '{"error":"planning_limit_reached","message":"trial planning used up"}'));
+  assert.equal(custom.code, 'planning_limit_reached');
+  assert.equal(custom.message, 'trial planning used up');
   const inactive = toSpiderError(httpFailure('GET /realtime/alerts', 403, '{"error":"agreement_inactive","message":"agreement expired"}'));
   assert.equal(inactive.code, 'agreement_inactive');
   assert.equal(inactive.message, 'agreement expired');
-  assert.equal(toSpiderError(httpFailure('routing plan', 403, '{"error":"search_limit_reached"}')).message, 'search limit reached');
+  assert.equal(toSpiderError(httpFailure('routing plan', 403, '{"error":"planning_limit_reached"}')).message, 'trip planning limit reached');
   assert.equal(toSpiderError(httpFailure('routing plan', 403, '{"error":"agreement_inactive","message":""}')).message, 'agreement is not active');
 });
 

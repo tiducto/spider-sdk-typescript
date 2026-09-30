@@ -228,8 +228,8 @@ export async function planWithErrorHandling(client: SpiderClient) {
     case 'query_retired':
       console.error('The API no longer serves this query')
       break
-    case 'search_limit_reached':
-      console.error('The project has used the trip-planning searches its plan includes')
+    case 'planning_limit_reached':
+      console.error('The project has reached the trip planning limit its plan includes')
       break
     case 'agreement_inactive':
       console.error('The project has no active agreement')

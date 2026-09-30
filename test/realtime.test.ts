@@ -47,7 +47,7 @@ test('vehicleForTrip treats 404 as no vehicle reporting', async () => {
 
 test('vehicleForTrip fails a 404 whose body names a plan limit, and a plain 404 stays no vehicle', async () => {
   for (const [code, message] of [
-    ['search_limit_reached', 'search limit reached'],
+    ['planning_limit_reached', 'trip planning limit reached'],
     ['agreement_inactive', 'agreement is not active'],
   ] as const) {
     const mock = mockFetch({ status: 404, json: { error: code, message } });

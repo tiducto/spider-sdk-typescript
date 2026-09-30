@@ -25,12 +25,12 @@ Targets Spider API contract 1.0. The first stable release: from here on, breakin
 ### Added
 
 - **`'query_retired'` error code** for a persisted query the API no longer serves (HTTP 410).
-- **`'search_limit_reached'` error code** when the project has used the trip-planning searches its plan
+- **`'planning_limit_reached'` error code** when the project has reached the trip planning limit its plan
   includes (trip planning only).
 - **`'agreement_inactive'` error code** when the project has no active agreement (every call).
   Both come from the response body's code whatever the HTTP status (a `vehicleForTrip` 404 carrying one is
   that error, not "no vehicle"); a 403 without one stays `unauthorized`. The message is the body's, or
-  `search limit reached` / `agreement is not active` when the body has none.
+  `trip planning limit reached` / `agreement is not active` when the body has none.
 - **Display fields.** `Leg`: `fromGtfsId`, `toGtfsId`, `fromPlatformCode`, `toPlatformCode`, `fromZoneId`,
   `toZoneId`, `routeGtfsId`, `routeColor`, `routeTextColor`. `Departure`: `routeGtfsId`, `routeColor`,
   `routeTextColor`, `stopGtfsId`, `platformCode`, `wheelchairAccessible`. `TripDetails`: `routeGtfsId`,

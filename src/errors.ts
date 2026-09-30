@@ -1,9 +1,9 @@
 /**
  * What went wrong. `bad_request` is an invalid or missing input, caught by the SDK before sending or
  * rejected by the server; `field` names it. `query_retired` means the API no longer serves the persisted
- * query behind the call (HTTP 410 Gone). `search_limit_reached` means the project has used the trip-planning
- * searches its plan includes; it applies to trip planning only. `agreement_inactive` means the project has no
- * active agreement; it applies to every call made with a client key.
+ * query behind the call (HTTP 410 Gone). `planning_limit_reached` means the project has reached the trip
+ * planning limit its plan includes; it applies to trip planning only. `agreement_inactive` means the project has
+ * no active agreement; it applies to every call made with a client key.
  */
 export type SpiderErrorCode =
   | 'network'
@@ -12,7 +12,7 @@ export type SpiderErrorCode =
   | 'bad_request'
   | 'not_found'
   | 'query_retired'
-  | 'search_limit_reached'
+  | 'planning_limit_reached'
   | 'agreement_inactive'
   | 'server'
   | 'rate_limited'
@@ -36,7 +36,7 @@ export interface SpiderError {
 const QUERY_RETIRED = 'query_retired';
 // Plan-limit refusals: the body code names the state, and the fixed wording stands in for a body without a message.
 const LIMIT_MESSAGES = {
-  search_limit_reached: 'search limit reached',
+  planning_limit_reached: 'trip planning limit reached',
   agreement_inactive: 'agreement is not active',
 } as const satisfies Partial<Record<SpiderErrorCode, string>>;
 type LimitCode = keyof typeof LIMIT_MESSAGES;
@@ -109,7 +109,7 @@ export function httpFailure(where: string, status: number, text: string, detail?
 }
 
 /**
- * The plan-limit error an `http` failure's body code names (`search_limit_reached`, `agreement_inactive`),
+ * The plan-limit error an `http` failure's body code names (`planning_limit_reached`, `agreement_inactive`),
  * whatever its status, or `undefined` when the body names neither.
  */
 export function limitRefusal(e: TransportError): SpiderError | undefined {
