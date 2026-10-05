@@ -1,5 +1,25 @@
 # Changelog
 
+## 1.1.0 — 2026-10-05
+
+Targets Spider API contract 1.1. Additive: existing calls behave as in 1.0.0.
+
+### Added
+
+- **`reliability` on `PlanOptions` and `PlanStreamRequestOptions`** (`Reliability`: `'STANDARD' | 'SAFE' |
+  'VERY_SAFE'`, exported). Arrivals are planned with the trip's typical delay at the median, 70th or 90th
+  percentile from the environment's realtime history; left undefined, the plan follows the timetable. Paging
+  keeps the level.
+- **Typical delays.** `Leg.typicalArrivalDelaySeconds` is the delay planned onto the leg's arrival at the
+  requested `reliability`. `Departure.typicalDelaySeconds` and `TripStop.typicalDelaySeconds` are the
+  median delay at that stop for that trip on the service date's day type. All are `null` without history.
+- **`Leg.interlineWithPreviousLeg`**: `true` when the rider stays on board as the vehicle continues as
+  another trip, often under another line number. Not counted in `numberOfTransfers`.
+
+### Changed
+
+- Requests use the contract 1.1 persisted queries for plan, plan stream, departures and trip.
+
 ## 1.0.0 — 2026-10-01
 
 Targets Spider API contract 1.0. The first stable release: from here on, breaking changes need a new major.
