@@ -10,6 +10,8 @@ export interface Leg {
   mode?: Mode;
   start: LegTime;
   end: LegTime;
+  /** Delay in seconds applied to this leg's arrival at the requested `reliability`; null when omitted or unknown. */
+  typicalArrivalDelay?: number;
   realtimeState?: RealtimeState;
   realTime?: boolean;
   serviceDate?: string;
@@ -21,5 +23,6 @@ export interface Leg {
   duration?: number;
   accessibilityScore?: number;
   trip?: Trip;
+  interlineWithPreviousLeg?: boolean;
   legGeometry?: Geometry;
 }

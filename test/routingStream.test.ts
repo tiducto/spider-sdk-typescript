@@ -37,6 +37,7 @@ test('chunk maps itineraries with realtime delays', () => {
             mode: 'BUS',
             start: { scheduledTime: '2026-07-15T08:00:00Z', estimated: { time: '2026-07-15T08:01:00Z', delay: 'PT60S' } },
             end: { scheduledTime: '2026-07-15T08:30:00Z', estimated: { time: '2026-07-15T08:32:00Z', delay: 'PT120S' } },
+            typicalArrivalDelay: 75,
             realtimeState: 'UPDATED',
             realTime: true,
             serviceDate: '2026-07-15',
@@ -44,6 +45,7 @@ test('chunk maps itineraries with realtime delays', () => {
             to: { name: 'Dest', stop: { gtfsId: '1:B' } },
             route: { shortName: '12' },
             trip: { gtfsId: '1:T' },
+            interlineWithPreviousLeg: true,
           },
         ],
       },
@@ -66,6 +68,8 @@ test('chunk maps itineraries with realtime delays', () => {
   assert.equal(leg.isRealtime, true);
   assert.equal(leg.realtimeState, 'UPDATED');
   assert.equal(leg.serviceDate, '2026-07-15');
+  assert.equal(leg.typicalArrivalDelaySeconds, 75);
+  assert.equal(leg.interlineWithPreviousLeg, true);
   assert.equal(leg.fromName, 'Origin');
   assert.equal(leg.fromGtfsId, '1:A');
   // Display fields the wire leaves out are null.
@@ -152,6 +156,7 @@ test('planStream posts the persisted query and streams result then done events',
     via: [ViaLocation.passThrough('1:V')],
     targetResults: 5,
     maxWindowMinutes: 180,
+    reliability: 'SAFE',
   })) {
     events.push(ev);
   }
@@ -167,6 +172,7 @@ test('planStream posts the persisted query and streams result then done events',
   assert.deepEqual(body.variables.via, [{ passThrough: { stopLocationIds: ['1:V'] } }]);
   assert.equal(body.variables.targetResults, 5);
   assert.equal(body.variables.maxWindow, 'PT180M');
+  assert.equal(body.variables.reliability, 'SAFE');
   // A fresh stream sends no continuation cursors.
   assert.equal(body.variables.after, undefined);
   assert.equal(body.variables.before, undefined);
@@ -199,6 +205,8 @@ test('planStreamNext continues forward from a done endCursor via after', async (
   assert.equal(body.variables.before, undefined);
   assert.equal(body.variables.targetResults, 8);
   assert.equal(body.variables.maxWindow, 'PT120M');
+  // No reliability requested = plan on the timetable: the variable is left out, not defaulted.
+  assert.equal('reliability' in body.variables, false);
   assert.deepEqual(events.map((e) => e.type), ['done']);
 });
 
@@ -209,7 +217,7 @@ test('planStreamPrevious continues backward from a done startCursor via before',
   const client = new SpiderClient('https://brno.api.tiducto.eu', 'k', { fetch: mock.fetch });
 
   const events: PlanStreamEvent[] = [];
-  for await (const ev of client.routing.planStreamPrevious(STREAM_OPTIONS, 'cursor-start')) {
+  for await (const ev of client.routing.planStreamPrevious({ ...STREAM_OPTIONS, reliability: 'VERY_SAFE' }, 'cursor-start')) {
     events.push(ev);
   }
 
@@ -217,6 +225,7 @@ test('planStreamPrevious continues backward from a done startCursor via before',
   const body = JSON.parse(mock.calls[0].body);
   assert.equal(body.variables.before, 'cursor-start');
   assert.equal(body.variables.after, undefined);
+  assert.equal(body.variables.reliability, 'VERY_SAFE');
   assert.deepEqual(events.map((e) => e.type), ['done']);
 });
 

@@ -5,7 +5,7 @@ import type { SpiderError } from './errors.ts';
 import { DecodingError, TransportError, badRequest, httpFailure, toSpiderError } from './errors.ts';
 import { graphqlFailure } from './http.ts';
 import type { GraphQLError } from './http.ts';
-import type { BikesAllowed, InputField, RealtimeState, RoutingErrorCode, TransitMode, WheelchairBoarding } from './enums.ts';
+import type { BikesAllowed, InputField, RealtimeState, Reliability, RoutingErrorCode, TransitMode, WheelchairBoarding } from './enums.ts';
 import {
   bikesAllowedFromWire,
   inputFieldFromWire,
@@ -55,6 +55,8 @@ export interface Leg {
   readonly startDelaySeconds: number | null;
   /** Arrival schedule deviation in seconds (positive = late), when known; otherwise null. */
   readonly endDelaySeconds: number | null;
+  /** Typical delay in seconds planned onto this leg's arrival at the requested `reliability`; null when none was requested or there is no history. */
+  readonly typicalArrivalDelaySeconds: number | null;
   readonly isRealtime: boolean;
   readonly realtimeState: RealtimeState | null;
   /** GTFS service date this leg's trip runs on (ISO `YYYY-MM-DD`) — pass to realtime `delays` lookups. */
@@ -79,6 +81,8 @@ export interface Leg {
   readonly distanceMeters: number | null;
   readonly durationSeconds: number | null;
   readonly tripGtfsId: string | null;
+  /** True when the rider stays on board from the previous leg as the vehicle continues as another trip; not counted as a transfer. */
+  readonly interlineWithPreviousLeg: boolean;
   readonly bikesAllowed: BikesAllowed | null;
   readonly accessibilityScore: number | null;
   readonly fromWheelchair: WheelchairBoarding | null;
@@ -157,6 +161,8 @@ export interface Departure {
   readonly realtimeTimeEpochMs: number | null;
   readonly isRealtime: boolean;
   readonly realtimeState: RealtimeState | null;
+  /** Typical (median) delay in seconds at this stop for this trip on its service date's day type; null when there is no history. */
+  readonly typicalDelaySeconds: number | null;
   readonly headsign: string | null;
   readonly tripGtfsId: string | null;
   /** GTFS service date the trip runs on (ISO `YYYY-MM-DD`) — pass it to {@link SpiderRouting.trip} and realtime `delays`. */
@@ -185,6 +191,8 @@ export interface TripStop {
   readonly realtimeArrivalEpochMs: number | null;
   readonly realtimeDepartureEpochMs: number | null;
   readonly isRealtime: boolean;
+  /** Typical (median) delay in seconds at this stop for this trip on its service date's day type; null when there is no history. */
+  readonly typicalDelaySeconds: number | null;
   readonly wheelchairBoarding: WheelchairBoarding | null;
   readonly platformCode: string | null;
   readonly zoneId: string | null;
@@ -227,6 +235,8 @@ export interface PlanOptions {
   readonly searchWindowMinutes?: number;
   /** Prefer wheelchair-accessible routing. */
   readonly wheelchairAccessible?: boolean;
+  /** Plan arrivals with typical delays at this level. Undefined = plan on the timetable. */
+  readonly reliability?: Reliability;
 }
 
 /**
@@ -243,6 +253,8 @@ export interface PlanStreamRequestOptions {
   readonly allowedTransitModes?: readonly TransitMode[];
   readonly maxTransfers?: number;
   readonly wheelchairAccessible?: boolean;
+  /** Plan arrivals with typical delays at this level. Undefined = plan on the timetable. */
+  readonly reliability?: Reliability;
   /**
    * Soft floor: the sweep keeps going until at least this many itineraries are found. From 1 up to the
    * environment's result count.
@@ -291,6 +303,7 @@ interface PlanRequest {
   readonly maxTransfers?: number;
   readonly searchWindowMinutes: number;
   readonly wheelchairAccessible: boolean;
+  readonly reliability?: Reliability;
 }
 
 const ROUTE_REQUEST = Symbol('spider.routeRequest');
@@ -316,6 +329,7 @@ export class SpiderRouting {
       maxTransfers: options.maxTransfers,
       searchWindowMinutes: options.searchWindowMinutes ?? DEFAULT_SEARCH_WINDOW_MINUTES,
       wheelchairAccessible: options.wheelchairAccessible ?? false,
+      reliability: options.reliability,
     };
     const invalid = invalidVia(request.via);
     if (invalid != null) return failure(invalid);
@@ -376,6 +390,7 @@ export class SpiderRouting {
       }),
       targetResults: options.targetResults,
       maxWindow: `PT${Math.floor(options.maxWindowMinutes)}M`,
+      reliability: options.reliability,
       before: cursor?.before,
       after: cursor?.after,
     };
@@ -534,6 +549,7 @@ export class SpiderRouting {
       modes: modesInput(request.allowedTransitModes),
       preferences: preferencesInput(request),
       searchWindow: `PT${Math.floor(request.searchWindowMinutes)}M`,
+      reliability: request.reliability,
       before,
       after,
     };
@@ -763,6 +779,7 @@ function mapLeg(leg: LegWire): Leg {
     endEstimated: leg.end.estimated?.time ?? null,
     startDelaySeconds: durationSecondsFromWire(leg.start.estimated?.delay),
     endDelaySeconds: durationSecondsFromWire(leg.end.estimated?.delay),
+    typicalArrivalDelaySeconds: leg.typicalArrivalDelay ?? null,
     isRealtime: leg.realTime ?? false,
     realtimeState: realtimeStateFromWire(leg.realtimeState),
     serviceDate: leg.serviceDate ?? null,
@@ -783,6 +800,7 @@ function mapLeg(leg: LegWire): Leg {
     distanceMeters: leg.distance ?? null,
     durationSeconds: leg.duration ?? null,
     tripGtfsId: leg.trip?.gtfsId ?? null,
+    interlineWithPreviousLeg: leg.interlineWithPreviousLeg ?? false,
     bikesAllowed: bikesAllowedFromWire(leg.trip?.bikesAllowed),
     accessibilityScore: leg.accessibilityScore ?? null,
     fromWheelchair: wheelchairFromWire(leg.from.stop?.wheelchairBoarding),
@@ -803,6 +821,7 @@ function mapDepartures(stop: DeparturesStopWire): Departure[] {
       realtimeTimeEpochMs: st.realtimeDeparture != null ? (serviceDay + st.realtimeDeparture) * 1000 : null,
       isRealtime: st.realtime ?? false,
       realtimeState: realtimeStateFromWire(st.realtimeState),
+      typicalDelaySeconds: st.typicalDelay ?? null,
       headsign: st.headsign ?? null,
       tripGtfsId: st.trip?.gtfsId ?? null,
       serviceDate: serviceDateOf(serviceDay),
@@ -839,6 +858,7 @@ function mapTrip(trip: TripTripWire): TripDetails {
       realtimeArrivalEpochMs: at(st.realtimeArrival),
       realtimeDepartureEpochMs: at(st.realtimeDeparture),
       isRealtime: st.realtime ?? false,
+      typicalDelaySeconds: st.typicalDelay ?? null,
       wheelchairBoarding: wheelchairFromWire(s.wheelchairBoarding),
       platformCode: s.platformCode ?? null,
       zoneId: s.zoneId ?? null,

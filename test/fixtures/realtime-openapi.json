@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Tiducto Transit API — Realtime",
-    "version": "1.0",
+    "version": "1.1",
     "description": "GTFS-RT live data (vehicles, delays, alerts) — a plain-REST customer surface (poll-based, key-auth). Companion to routing and stops; the three share one pack version. Deliberately poll-only (cacheable, high-fanout) — no streaming/subscription surface, so it is OpenAPI, not AsyncAPI. Enum-ish fields are bare strings so unrecognized producer values pass through unchanged. Every id in a response is feed-prefixed (`<feedId>:<id>`), the same form routing's `gtfsId` and stop search return. Id inputs accept the prefixed form or the raw GTFS id."
   },
   "servers": [

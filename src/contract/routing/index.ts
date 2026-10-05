@@ -53,6 +53,7 @@ export type { PlanViaLocationInput } from './PlanViaLocationInput.ts';
 export type { PlanVisitViaLocationInput } from './PlanVisitViaLocationInput.ts';
 export type { RealTimeEstimate } from './RealTimeEstimate.ts';
 export type { RealtimeState } from './RealtimeState.ts';
+export type { Reliability } from './Reliability.ts';
 export type { Route } from './Route.ts';
 export type { RoutingError } from './RoutingError.ts';
 export type { RoutingErrorCode } from './RoutingErrorCode.ts';

@@ -3,6 +3,7 @@ import type { PlanLabeledLocationInput } from './PlanLabeledLocationInput.ts';
 import type { PlanModesInput } from './PlanModesInput.ts';
 import type { PlanPreferencesInput } from './PlanPreferencesInput.ts';
 import type { PlanViaLocationInput } from './PlanViaLocationInput.ts';
+import type { Reliability } from './Reliability.ts';
 
 export interface PlanConnectionStreamVariables {
   dateTime: PlanDateTimeInput;
@@ -13,6 +14,8 @@ export interface PlanConnectionStreamVariables {
   preferences?: PlanPreferencesInput;
   targetResults: number;
   maxWindow: string;
+  /** Delay-aware planning level; omitted plans on the timetable. */
+  reliability?: Reliability;
   before?: string;
   after?: string;
 }

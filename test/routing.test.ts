@@ -24,6 +24,7 @@ const PLAN_ENVELOPE = {
                 mode: 'TRAM',
                 start: { scheduledTime: '2026-07-20T08:00:00Z', estimated: { time: '2026-07-20T08:02:00Z', delay: 'PT120S' } },
                 end: { scheduledTime: '2026-07-20T08:15:00Z', estimated: { time: '2026-07-20T08:16:00Z', delay: 'PT60S' } },
+                typicalArrivalDelay: 90,
                 realtimeState: 'UPDATED',
                 realTime: true,
                 serviceDate: '2026-07-20',
@@ -35,6 +36,7 @@ const PLAN_ENVELOPE = {
                 duration: 900,
                 accessibilityScore: 1,
                 trip: { gtfsId: '1:trip', bikesAllowed: 'ALLOWED' },
+                interlineWithPreviousLeg: true,
                 legGeometry: { points: '_p~iF~ps|U' },
               },
             ],
@@ -69,6 +71,8 @@ test('plan posts the persisted query and maps the route', async () => {
   assert.equal(body.id, PLAN.id);
   assert.equal(body.variables.first, undefined);
   assert.equal(body.variables.last, undefined);
+  // No reliability requested = plan on the timetable: the variable is left out, not defaulted.
+  assert.equal('reliability' in body.variables, false);
   assert.deepEqual(body.variables.origin, { location: { coordinate: { latitude: 49.19, longitude: 16.61 } } });
   assert.ok(typeof body.variables.dateTime.earliestDeparture === 'string');
 
@@ -105,7 +109,46 @@ test('plan posts the persisted query and maps the route', async () => {
   assert.equal(leg.endDelaySeconds, 60);
   assert.equal(leg.startEstimated, '2026-07-20T08:02:00Z');
   assert.equal(leg.serviceDate, '2026-07-20');
+  assert.equal(leg.typicalArrivalDelaySeconds, 90);
+  assert.equal(leg.interlineWithPreviousLeg, true);
   assert.equal(route.pageInfo.hasNextPage, true);
+});
+
+test('plan sends reliability when set and keeps it when paging', async () => {
+  const mock = mockFetch({ json: PLAN_ENVELOPE });
+  const client = new SpiderClient('https://x', 'k', { fetch: mock.fetch });
+
+  const first = await client.routing.plan({
+    origin: Location.stop('1:A'),
+    destination: Location.stop('1:B'),
+    reliability: 'VERY_SAFE',
+  });
+  if (!first.isSuccess) throw new Error(first.error.code);
+  await client.routing.planNext(first.data);
+
+  assert.equal(JSON.parse(mock.calls[0].body).variables.reliability, 'VERY_SAFE');
+  assert.equal(JSON.parse(mock.calls[1].body).variables.reliability, 'VERY_SAFE');
+});
+
+test('a leg without a typical arrival delay or interline flag maps to null and false', async () => {
+  const envelope = structuredClone(PLAN_ENVELOPE) as unknown as {
+    data: { planConnection: { edges: { node: { legs: Record<string, unknown>[] } }[] } };
+  };
+  const legs = envelope.data.planConnection.edges[0].node.legs;
+  const absent = { ...legs[0] };
+  delete absent.typicalArrivalDelay;
+  delete absent.interlineWithPreviousLeg;
+  legs.splice(0, 1, { ...legs[0], typicalArrivalDelay: null, interlineWithPreviousLeg: null }, absent);
+  const mock = mockFetch({ json: envelope });
+  const client = new SpiderClient('https://x', 'k', { fetch: mock.fetch });
+
+  const result = await client.routing.plan({ origin: Location.stop('1:A'), destination: Location.stop('1:B') });
+
+  if (!result.isSuccess) throw new Error(result.error.code);
+  for (const leg of result.data.edges[0].itinerary.legs) {
+    assert.equal(leg.typicalArrivalDelaySeconds, null);
+    assert.equal(leg.interlineWithPreviousLeg, false);
+  }
 });
 
 test('plan with arriveBy sets latestArrival', async () => {
@@ -139,6 +182,7 @@ test('departures maps stoptimes, keeps rows headed for the stop itself, and carr
               realtimeDeparture: 90,
               realtime: true,
               realtimeState: 'UPDATED',
+              typicalDelay: 45,
               headsign: 'Center',
               stop: { gtfsId: 'U1Z2', platformCode: '2' },
               trip: {
@@ -182,12 +226,14 @@ test('departures maps stoptimes, keeps rows headed for the stop itself, and carr
   assert.equal(d.stopGtfsId, 'U1Z2');
   assert.equal(d.platformCode, '2');
   assert.equal(d.wheelchairAccessible, 'POSSIBLE');
+  assert.equal(d.typicalDelaySeconds, 45);
   // Display fields the wire leaves out are null.
   const bare = result.data[1];
   assert.equal(bare.routeColor, null);
   assert.equal(bare.stopGtfsId, null);
   assert.equal(bare.platformCode, null);
   assert.equal(bare.wheelchairAccessible, null);
+  assert.equal(bare.typicalDelaySeconds, null);
 });
 
 test('departure serviceDate is the trip\'s service day, across midnight and DST', async () => {
@@ -200,7 +246,7 @@ test('departure serviceDate is the trip\'s service day, across midnight and DST'
           name: 'Station',
           stoptimesWithoutPatterns: [
             // 00:40 on 21 July, still on the 20 July service day.
-            { serviceDay: SERVICE_DAY_2026_07_20, scheduledDeparture: 24 * 3600 + 40 * 60, trip: { gtfsId: 'night' } },
+            { serviceDay: SERVICE_DAY_2026_07_20, scheduledDeparture: 24 * 3600 + 40 * 60, typicalDelay: 20, trip: { gtfsId: 'night' } },
             // 25 October is a 25-hour day; its anchor is 23:00Z the day before.
             { serviceDay: SERVICE_DAY_2026_10_25, scheduledDeparture: 8 * 3600, trip: { gtfsId: 'dst' } },
           ],
@@ -215,7 +261,9 @@ test('departure serviceDate is the trip\'s service day, across midnight and DST'
   const [night, dst] = result.data;
   assert.equal(new Date(night.scheduledTimeEpochMs).toISOString(), '2026-07-20T22:40:00.000Z');
   assert.equal(night.serviceDate, '2026-07-20');
+  assert.equal(night.typicalDelaySeconds, 20);
   assert.equal(dst.serviceDate, '2026-10-25');
+  assert.equal(dst.typicalDelaySeconds, null);
 });
 
 test('trip maps stops, geometry and enums', async () => {
@@ -235,7 +283,14 @@ test('trip maps stops, geometry and enums', async () => {
               scheduledArrival: 60,
               scheduledDeparture: 65,
               realtime: false,
+              typicalDelay: 30,
               stop: { gtfsId: 's1', name: 'Stop 1', lat: 49.1, lon: 16.6, wheelchairBoarding: 'POSSIBLE', platformCode: 'A', zoneId: '100' },
+            },
+            {
+              serviceDay: SERVICE_DAY_2026_07_20,
+              scheduledArrival: 120,
+              typicalDelay: null,
+              stop: { gtfsId: 's2', name: 'Stop 2' },
             },
           ],
           tripGeometry: { points: '_p~iF~ps|U', length: 1 },
@@ -259,8 +314,10 @@ test('trip maps stops, geometry and enums', async () => {
   assert.equal(trip.routeTextColor, '000000');
   assert.equal(trip.stops[0].platformCode, 'A');
   assert.equal(trip.stops[0].zoneId, '100');
-  assert.equal(trip.stops.length, 1);
+  assert.equal(trip.stops.length, 2);
   assert.equal(trip.stops[0].name, 'Stop 1');
+  assert.equal(trip.stops[0].typicalDelaySeconds, 30);
+  assert.equal(trip.stops[1].typicalDelaySeconds, null);
   assert.equal(trip.stops[0].scheduledArrivalEpochMs, (SERVICE_DAY_2026_07_20 + 60) * 1000);
   assert.equal(trip.stops[0].wheelchairBoarding, 'POSSIBLE');
   assert.equal(trip.geometry.length, 1);
@@ -536,12 +593,13 @@ test('planPrevious pages backward with before and no count', async () => {
   const mock = mockFetch({ json: envelope });
   const client = new SpiderClient('https://x', 'k', { fetch: mock.fetch });
 
-  const first = await client.routing.plan({ origin: Location.stop('1:U1'), destination: Location.stop('1:U2') });
+  const first = await client.routing.plan({ origin: Location.stop('1:U1'), destination: Location.stop('1:U2'), reliability: 'SAFE' });
   if (!first.isSuccess) throw new Error('expected success');
   await client.routing.planPrevious(first.data);
 
   const body = JSON.parse(mock.calls[1].body);
   assert.equal(body.variables.before, 'c1');
+  assert.equal(body.variables.reliability, 'SAFE');
   assert.equal(body.variables.first, undefined);
   assert.equal(body.variables.last, undefined);
   assert.equal(body.variables.after, undefined);

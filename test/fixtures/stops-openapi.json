@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Tiducto Transit API — Stops",
-    "version": "1.0",
+    "version": "1.1",
     "description": "Stop text/geo search — a plain-REST customer surface (key-auth). Companion to routing and realtime; the three share one pack version. `locationType` and `wheelchairBoarding` are GTFS integer codes, not enums, so an unrecognized code passes through unchanged."
   },
   "servers": [
