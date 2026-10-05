@@ -217,7 +217,7 @@ test('planStreamPrevious continues backward from a done startCursor via before',
   const client = new SpiderClient('https://brno.api.tiducto.eu', 'k', { fetch: mock.fetch });
 
   const events: PlanStreamEvent[] = [];
-  for await (const ev of client.routing.planStreamPrevious(STREAM_OPTIONS, 'cursor-start')) {
+  for await (const ev of client.routing.planStreamPrevious({ ...STREAM_OPTIONS, reliability: 'VERY_SAFE' }, 'cursor-start')) {
     events.push(ev);
   }
 
@@ -225,6 +225,7 @@ test('planStreamPrevious continues backward from a done startCursor via before',
   const body = JSON.parse(mock.calls[0].body);
   assert.equal(body.variables.before, 'cursor-start');
   assert.equal(body.variables.after, undefined);
+  assert.equal(body.variables.reliability, 'VERY_SAFE');
   assert.deepEqual(events.map((e) => e.type), ['done']);
 });
 

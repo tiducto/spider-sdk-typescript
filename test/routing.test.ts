@@ -246,7 +246,7 @@ test('departure serviceDate is the trip\'s service day, across midnight and DST'
           name: 'Station',
           stoptimesWithoutPatterns: [
             // 00:40 on 21 July, still on the 20 July service day.
-            { serviceDay: SERVICE_DAY_2026_07_20, scheduledDeparture: 24 * 3600 + 40 * 60, trip: { gtfsId: 'night' } },
+            { serviceDay: SERVICE_DAY_2026_07_20, scheduledDeparture: 24 * 3600 + 40 * 60, typicalDelay: 20, trip: { gtfsId: 'night' } },
             // 25 October is a 25-hour day; its anchor is 23:00Z the day before.
             { serviceDay: SERVICE_DAY_2026_10_25, scheduledDeparture: 8 * 3600, trip: { gtfsId: 'dst' } },
           ],
@@ -261,7 +261,9 @@ test('departure serviceDate is the trip\'s service day, across midnight and DST'
   const [night, dst] = result.data;
   assert.equal(new Date(night.scheduledTimeEpochMs).toISOString(), '2026-07-20T22:40:00.000Z');
   assert.equal(night.serviceDate, '2026-07-20');
+  assert.equal(night.typicalDelaySeconds, 20);
   assert.equal(dst.serviceDate, '2026-10-25');
+  assert.equal(dst.typicalDelaySeconds, null);
 });
 
 test('trip maps stops, geometry and enums', async () => {
@@ -591,12 +593,13 @@ test('planPrevious pages backward with before and no count', async () => {
   const mock = mockFetch({ json: envelope });
   const client = new SpiderClient('https://x', 'k', { fetch: mock.fetch });
 
-  const first = await client.routing.plan({ origin: Location.stop('1:U1'), destination: Location.stop('1:U2') });
+  const first = await client.routing.plan({ origin: Location.stop('1:U1'), destination: Location.stop('1:U2'), reliability: 'SAFE' });
   if (!first.isSuccess) throw new Error('expected success');
   await client.routing.planPrevious(first.data);
 
   const body = JSON.parse(mock.calls[1].body);
   assert.equal(body.variables.before, 'c1');
+  assert.equal(body.variables.reliability, 'SAFE');
   assert.equal(body.variables.first, undefined);
   assert.equal(body.variables.last, undefined);
   assert.equal(body.variables.after, undefined);
