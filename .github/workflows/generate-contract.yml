@@ -27,4 +27,6 @@ jobs:
         version.properties
         src/contractVersion.ts
         src/persistedQueries.ts
+        test/fixtures/stops-openapi.json
+        test/fixtures/realtime-openapi.json
     secrets: inherit
