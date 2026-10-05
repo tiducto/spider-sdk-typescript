@@ -8,6 +8,8 @@ export interface StopDeparturesStoptime {
   realtimeDeparture?: number;
   realtime?: boolean;
   realtimeState?: RealtimeState;
+  /** Typical (p50) delay at this stop in seconds for this trip on the service date's day type; null when unknown. */
+  typicalDelay?: number;
   headsign?: string;
   stop?: StopDeparturesStop;
   trip?: StopDeparturesTrip;
