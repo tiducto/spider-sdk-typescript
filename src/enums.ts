@@ -56,6 +56,9 @@ export type RoutingErrorCode =
 
 export type InputField = 'DATE_TIME' | 'FROM' | 'TO' | 'VIA' | 'UNKNOWN';
 
+/** Delay-aware planning level: arrivals are planned with the typical delay at the median (`STANDARD`), 70th (`SAFE`) or 90th (`VERY_SAFE`) percentile. */
+export type Reliability = 'STANDARD' | 'SAFE' | 'VERY_SAFE';
+
 type Known<T extends string> = Record<Exclude<T, 'UNKNOWN'>, true>;
 
 const TRANSIT_MODES: Known<TransitMode> = {

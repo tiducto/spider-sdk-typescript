@@ -11,6 +11,7 @@ export type {
   RealtimeState,
   RoutingErrorCode,
   InputField,
+  Reliability,
 } from './enums.ts';
 export { SpiderRouting } from './routing.ts';
 export type {

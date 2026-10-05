@@ -14,7 +14,7 @@ import {
   wheelchairFromGtfs,
   wheelchairFromWire,
 } from '../src/enums.ts';
-import type { BikesAllowed, InputField, RealtimeState, RoutingErrorCode, TransitMode, WheelchairBoarding } from '../src/index.ts';
+import type { BikesAllowed, InputField, RealtimeState, Reliability, RoutingErrorCode, TransitMode, WheelchairBoarding } from '../src/index.ts';
 
 const ROUTING_CONTRACT = path.join(path.dirname(path.dirname(fileURLToPath(import.meta.url))), 'src/contract/routing');
 
@@ -68,6 +68,11 @@ test('absent and no-information values decode to null', () => {
   assert.equal(routingErrorCodeFromWire(undefined), 'UNKNOWN');
 });
 
+test('Reliability carries exactly the contract planning levels', () => {
+  const levels: Record<Reliability, true> = { STANDARD: true, SAFE: true, VERY_SAFE: true };
+  assert.deepEqual(Object.keys(levels).sort(), wireValues('Reliability').sort());
+});
+
 test('stop-search wheelchair codes decode like the routing enum', () => {
   assert.equal(wheelchairFromGtfs(1), 'POSSIBLE');
   assert.equal(wheelchairFromGtfs(2), 'NOT_POSSIBLE');
@@ -86,6 +91,8 @@ export const notAState: RealtimeState = 'DELAYED';
 export const notACode: RoutingErrorCode = 'NEW_CODE';
 // @ts-expect-error not an InputField
 export const notAField: InputField = 'FROM_PLACE';
+// @ts-expect-error not a Reliability
+export const notALevel: Reliability = 'RISKY';
 // @ts-expect-error wire spelling only
 export const notWheelchair: WheelchairBoarding = 'Possible';
 // @ts-expect-error wire spelling only

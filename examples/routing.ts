@@ -190,6 +190,7 @@ export async function planWithOptions(client: SpiderClient) {
     maxTransfers: 2,                      // hard cap on transfers in any returned itinerary
     searchWindowMinutes: 90,              // widen the window for sparse/intercity routes (default 60)
     wheelchairAccessible: true,           // prefer step-free routing
+    reliability: 'SAFE',                  // plan arrivals with typical delays (undefined = timetable)
   })
 
   if (result.isSuccess) {
