@@ -1,6 +1,6 @@
 import { CONTRACT_HEADER, CONTRACT_VERSION } from './contract.ts';
 import { SDK_HEADER, SDK_IDENTITY } from './sdk.ts';
-import { DecodingError, TransportError, httpFailure } from './errors.ts';
+import { DecodingError, httpFailure } from './errors.ts';
 
 export type FetchLike = typeof fetch;
 
@@ -32,25 +32,6 @@ export interface RawResponse {
   readonly text: string;
 }
 
-export interface GraphQLError {
-  message: string;
-  extensions?: { code?: string; field?: string } | null;
-}
-
-export interface GraphQLEnvelope<D> {
-  data?: D | null;
-  errors?: ReadonlyArray<GraphQLError> | null;
-}
-
-/** A GraphQL `errors` array → a typed bad_request for a BAD_REQUEST extension (with its field), else upstream. */
-export function graphqlFailure(where: string, errors: ReadonlyArray<GraphQLError>): TransportError {
-  const bad = errors.find((e) => e.extensions?.code === 'BAD_REQUEST');
-  if (bad != null) {
-    return new TransportError('bad_request', bad.message, undefined, undefined, bad.extensions?.field);
-  }
-  return new TransportError('upstream', `${where} errors: ${errors.map((e) => e.message).join(', ')}`);
-}
-
 export function parseJson<T>(text: string, where: string): T {
   try {
     return JSON.parse(text) as T;
@@ -77,24 +58,6 @@ export class Transport {
     this.retry = options?.retry;
   }
 
-  async graphql<D>(op: { id: string; path: string }, variables: unknown): Promise<D> {
-    const res = await this.send(`${this.baseUrl}/routing/${op.path}`, {
-      method: 'POST',
-      headers: this.contractHeaders({ 'content-type': 'application/json' }),
-      body: JSON.stringify({ id: op.id, variables }),
-    });
-    const text = await res.text();
-    if (!res.ok) throw httpFailure(`routing ${op.path}`, res.status, text);
-    const envelope = parseJson<GraphQLEnvelope<D>>(text, `routing ${op.path}`);
-    if (envelope.errors != null && envelope.errors.length > 0) {
-      throw graphqlFailure(`routing ${op.path}`, envelope.errors);
-    }
-    if (envelope.data == null) {
-      throw new TransportError('no_data', `routing ${op.path} returned no data`);
-    }
-    return envelope.data;
-  }
-
   async postJson<D>(path: string, body: unknown, errorMessage?: (raw: string) => string): Promise<D> {
     const res = await this.send(`${this.baseUrl}${path}`, {
       method: 'POST',
@@ -107,22 +70,22 @@ export class Transport {
   }
 
   /**
-   * Opens a Server-Sent Events stream: POSTs `{ id, variables }` to `/routing/{op.path}` and returns the raw
-   * streaming {@link Response} for the caller to read frame-by-frame. Unlike {@link send}, it does not
-   * auto-retry — a streamed response is consumed over time, so retrying (or aborting once the body is
-   * flowing) makes no sense; the connect timeout guards only the initial handshake and is cleared the moment
-   * the response headers arrive, leaving the body to stream uninterrupted.
+   * Opens a Server-Sent Events stream: POSTs `body` to `path` and returns the raw streaming {@link Response} for
+   * the caller to read frame-by-frame. Unlike {@link send}, it does not auto-retry — a streamed response is
+   * consumed over time, so retrying (or aborting once the body is flowing) makes no sense; the connect timeout
+   * guards only the initial handshake and is cleared the moment the response headers arrive, leaving the body to
+   * stream uninterrupted.
    */
-  async stream(op: { id: string; path: string }, variables: unknown): Promise<Response> {
+  async stream(path: string, body: unknown): Promise<Response> {
     const headers = this.contractHeaders({ 'content-type': 'application/json', accept: 'text/event-stream' });
     headers.set('apikey', this.apiKey);
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), this.timeoutMs);
     try {
-      return await this.doFetch(`${this.baseUrl}/routing/${op.path}`, {
+      return await this.doFetch(`${this.baseUrl}${path}`, {
         method: 'POST',
         headers,
-        body: JSON.stringify({ id: op.id, variables }),
+        body: JSON.stringify(body),
         signal: controller.signal,
       });
     } finally {

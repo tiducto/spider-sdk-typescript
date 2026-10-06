@@ -170,7 +170,7 @@ export async function wheelchairPlan(client: SpiderClient) {
   if (result.isSuccess) {
     for (const edge of result.data.edges) {
       const itinerary = edge.itinerary
-      console.log(`${itinerary.start} → ${itinerary.end}  ·  accessibility score ${itinerary.accessibilityScore ?? 'n/a'}`)
+      console.log(`${itinerary.start} → ${itinerary.end}`)
       for (const leg of itinerary.legs) {
         console.log(`  ${leg.mode ?? 'walk'}: board ${leg.fromWheelchair ?? 'unknown'} → alight ${leg.toWheelchair ?? 'unknown'}`)
       }
@@ -220,14 +220,10 @@ export async function planWithErrorHandling(client: SpiderClient) {
   // minor release, so keep a default branch.
   switch (result.error.code) {
     case 'unauthorized':
-      if (result.error.serverCode === 'persisted_query_rejected') {
-        console.error('This environment does not recognise the query')
-      } else {
-        console.error('Bad or missing apikey — it is scoped to one project + environment')
-      }
+      console.error('Bad or missing apikey — it is scoped to one project + environment')
       break
     case 'query_retired':
-      console.error('The API no longer serves this query')
+      console.error('The API part this SDK version calls is retired — upgrade the SDK')
       break
     case 'planning_limit_reached':
       console.error('The project has reached the trip planning limit its plan includes')

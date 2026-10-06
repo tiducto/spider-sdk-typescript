@@ -1,13 +1,13 @@
 import type { AlightPreferencesInput } from './AlightPreferencesInput.ts';
 import type { BoardPreferencesInput } from './BoardPreferencesInput.ts';
-import type { TimetablePreferencesInput } from './TimetablePreferencesInput.ts';
 import type { TransferPreferencesInput } from './TransferPreferencesInput.ts';
 import type { TransitFilterInput } from './TransitFilterInput.ts';
 
+/** Transit preferences. */
 export interface TransitPreferencesInput {
-  alight?: AlightPreferencesInput;
-  board?: BoardPreferencesInput;
-  filters?: TransitFilterInput[];
-  timetable?: TimetablePreferencesInput;
   transfer?: TransferPreferencesInput;
+  board?: BoardPreferencesInput;
+  alight?: AlightPreferencesInput;
+  /** Routes or agencies to leave out of the search. */
+  filters?: TransitFilterInput[];
 }
