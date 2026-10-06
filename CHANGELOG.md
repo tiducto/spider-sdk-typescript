@@ -1,5 +1,40 @@
 # Changelog
 
+## 1.2.0 — 2026-10-06
+
+Targets Spider API contract 1.2. Routing moves from persisted GraphQL queries to plain REST operations, and every
+routing, stops and realtime path moves under `/v1`; the public API stays as it was apart from the changes below.
+SDKs up to 1.1 do not work against contract 1.2, so every surface needs this release.
+
+### Changed
+
+- **Routing calls are REST.** `plan`, `planNext` and `planPrevious` POST a JSON body to `/routing/v1/plan`,
+  `departures` to `/routing/v1/departures` and `trip` to `/routing/v1/trip`; `planStream`, `planStreamNext` and
+  `planStreamPrevious` POST to `/routing/v1/plan-stream` and read its event stream. The SDK sends no
+  persisted-query ids.
+- **Stops and realtime calls use the `/v1` paths:** `/stops/v1/search`, `/realtime/v1/vehicles`,
+  `/realtime/v1/vehicles/by-trip/{id}`, `/realtime/v1/delays` and `/realtime/v1/alerts`. Requests and responses
+  are unchanged.
+- **`'query_retired'` (HTTP 410) carries the server's message**, or `this API part is retired` when it sends
+  none.
+- **A visit to a coordinate is rejected before any request**, as `bad_request` on `via` (`via is invalid`), the
+  answer the server already gave. `ViaLocation.visit` takes a stop.
+- **A visit waits at most 3600 seconds** (was 86400). A longer or negative wait is rejected before any request,
+  as `bad_request` on `via.visit.minimumWaitTime`.
+- **A server `bad_request` names its field as a dot path** from the request body root (e.g.
+  `preferences.transit.transfer.maximumTransfers`): the response's `field`, else the one its
+  `<field> is required|invalid|out of range|not allowed` message names.
+- **A plan stream ends with its `done` event, or with a `network` failure when it ends before its `pageInfo`**
+  (the connection dropped). Events this SDK does not know are ignored, `error` included; a malformed event ends
+  the stream with a `decoding` failure.
+- **A plan-limit refusal's code is the response body's `code`, else its `error`.**
+- `serverCode` `persisted_query_rejected` is no longer sent: the SDK sends no persisted queries.
+
+### Deprecated
+
+- `RouteEdge.cursor`: always `'NoCursor'`; page with `Route.pageInfo`.
+- `Itinerary.accessibilityScore` and `Leg.accessibilityScore`: always `null`.
+
 ## 1.1.0 — 2026-10-05
 
 Targets Spider API contract 1.1. Additive: existing calls behave as in 1.0.0.

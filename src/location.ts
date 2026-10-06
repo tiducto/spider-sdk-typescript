@@ -16,8 +16,10 @@ export type ViaLocation =
   | { readonly kind: 'visit'; readonly location: Location; readonly minimumWaitSeconds: number };
 
 /**
- * A point the itinerary must pass. How many a request may carry is an environment setting; each pass-through takes
- * 1 to 10 stop ids and a visit waits 0 to 86400 seconds, else the request fails as `bad_request` on `via`.
+ * A point the itinerary must pass. How many a request may carry is an environment setting. Each pass-through takes
+ * 1 to 10 stop ids, else the request fails as `bad_request` on `via`. A visit is to a stop and waits 0 to 3600
+ * seconds: a coordinate fails as `bad_request` on `via` (`via is invalid`), and a wait outside that range on
+ * `via.visit.minimumWaitTime`.
  */
 export const ViaLocation = {
   passThrough(...stopIds: string[]): ViaLocation {

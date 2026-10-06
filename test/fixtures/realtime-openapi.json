@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Tiducto Transit API — Realtime",
-    "version": "1.1",
+    "version": "1.2",
     "description": "GTFS-RT live data (vehicles, delays, alerts) — a plain-REST customer surface (poll-based, key-auth). Companion to routing and stops; the three share one pack version. Deliberately poll-only (cacheable, high-fanout) — no streaming/subscription surface, so it is OpenAPI, not AsyncAPI. Enum-ish fields are bare strings so unrecognized producer values pass through unchanged. Every id in a response is feed-prefixed (`<feedId>:<id>`), the same form routing's `gtfsId` and stop search return. Id inputs accept the prefixed form or the raw GTFS id."
   },
   "servers": [
@@ -22,9 +22,10 @@
     }
   ],
   "paths": {
-    "/realtime/vehicles": {
+    "/realtime/v1/vehicles": {
       "get": {
-        "summary": "Live vehicle positions for the given trips. `tripIds` is required: 1 to 50 comma-separated trip ids per request. None, or more than 50, is an HTTP 400 naming `tripIds`.",
+        "summary": "Realtime Vehicles",
+        "description": "Live vehicle positions for the given trips. `tripIds` is required: 1 to 50 comma-separated trip ids per request. None, or more than 50, is an HTTP 400 naming `tripIds`.",
         "operationId": "realtime_vehicles",
         "x-surface": "realtime",
         "parameters": [
@@ -94,9 +95,10 @@
         }
       }
     },
-    "/realtime/vehicles/by-trip/{id}": {
+    "/realtime/v1/vehicles/by-trip/{id}": {
       "get": {
-        "summary": "Live vehicle for a single trip. Always 200 with a freshness envelope; `vehicle` is absent when none is currently reporting (a normal state, never 404).",
+        "summary": "Realtime Vehicle By Trip",
+        "description": "Live vehicle for a single trip. Always 200 with a freshness envelope; `vehicle` is absent when none is currently reporting (a normal state, never 404).",
         "operationId": "realtime_vehicle_by_trip",
         "x-surface": "realtime",
         "parameters": [
@@ -163,9 +165,10 @@
         }
       }
     },
-    "/realtime/delays": {
+    "/realtime/v1/delays": {
       "post": {
-        "summary": "Live schedule deviation, resolved per trip instance (trip_id + service date).\n  Group the trip ids you want by the GTFS serviceDate — ISO-8601 YYYY-MM-DD, the\n  same value a plan leg's, departure's or trip's serviceDate carries — take it\n  from there, never from the departure clock time (GTFS times may exceed 24:00).\n  A trip instance the feed doesn't hold comes back in that group's `missing`,\n  not painted with another day's delay.",
+        "summary": "Realtime Delays",
+        "description": "Live schedule deviation, resolved per trip instance (trip_id + service date).\nGroup the trip ids you want by the GTFS serviceDate — ISO-8601 YYYY-MM-DD, the\nsame value a plan leg's, departure's or trip's serviceDate carries — take it\nfrom there, never from the departure clock time (GTFS times may exceed 24:00).\nA trip instance the feed doesn't hold comes back in that group's `missing`,\nnot painted with another day's delay.",
         "operationId": "realtime_delays",
         "x-surface": "realtime",
         "requestBody": {
@@ -246,9 +249,10 @@
         }
       }
     },
-    "/realtime/alerts": {
+    "/realtime/v1/alerts": {
       "get": {
-        "summary": "All active service alerts for the environment.",
+        "summary": "Realtime Alerts",
+        "description": "All active service alerts for the environment.",
         "operationId": "realtime_alerts",
         "x-surface": "realtime",
         "responses": {
@@ -405,7 +409,7 @@
       },
       "DelaysRequest": {
         "type": "object",
-        "description": "POST body for `/realtime/delays`. Delays are resolved per trip *instance*: a GTFS-RT TripUpdate is bound to a trip instance by (trip_id, start_date), so trip ids are grouped by the GTFS `serviceDate` they run on. Group ids by date rather than sending flat (tripId, serviceDate) pairs — the cardinality is 1-2 dates x many trips. `tripIds` is required: 1 to 50 trip ids per request, counted across all `queries`. None, or more than 50, is an HTTP 400 naming `tripIds`.",
+        "description": "POST body for `/realtime/v1/delays`. Delays are resolved per trip *instance*: a GTFS-RT TripUpdate is bound to a trip instance by (trip_id, start_date), so trip ids are grouped by the GTFS `serviceDate` they run on. Group ids by date rather than sending flat (tripId, serviceDate) pairs — the cardinality is 1-2 dates x many trips. `tripIds` is required: 1 to 50 trip ids per request, counted across all `queries`. None, or more than 50, is an HTTP 400 naming `tripIds`.",
         "properties": {
           "queries": {
             "type": "array",
@@ -624,13 +628,18 @@
       },
       "ErrorResponse": {
         "type": "object",
-        "description": "Standard error body: a stable machine-readable `code` and a human-readable `message`.",
+        "description": "Error body: a stable machine-readable `code` (a state name) and a human-readable `message`.",
         "properties": {
           "code": {
             "type": "string"
           },
           "message": {
-            "type": "string"
+            "type": "string",
+            "description": "For bad_request: `<field> is required|invalid|out of range|not allowed`."
+          },
+          "field": {
+            "type": "string",
+            "description": "The request member a 400 names, as a dot path from the body root (array positions omitted)."
           }
         },
         "required": [

@@ -2,8 +2,9 @@ import type { AccessibilityPreferencesInput } from './AccessibilityPreferencesIn
 import type { PlanStreetPreferencesInput } from './PlanStreetPreferencesInput.ts';
 import type { TransitPreferencesInput } from './TransitPreferencesInput.ts';
 
+/** Routing preferences. An absent member keeps the environment's default. */
 export interface PlanPreferencesInput {
-  accessibility?: AccessibilityPreferencesInput;
   street?: PlanStreetPreferencesInput;
   transit?: TransitPreferencesInput;
+  accessibility?: AccessibilityPreferencesInput;
 }

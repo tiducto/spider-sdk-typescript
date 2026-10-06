@@ -6,23 +6,30 @@ import type { RealtimeState } from './RealtimeState.ts';
 import type { Route } from './Route.ts';
 import type { Trip } from './Trip.ts';
 
+/** One walk or ride. */
 export interface Leg {
   mode?: Mode;
   start: LegTime;
   end: LegTime;
-  /** Delay in seconds applied to this leg's arrival at the requested `reliability`; null when omitted or unknown. */
+  /** Seconds of delay applied to this leg's arrival at the requested `reliability`: that trip's typical delay at the stop on the service date's day type, from the environment's realtime history. Null when `reliability` is omitted or there is no history. */
   typicalArrivalDelay?: number;
   realtimeState?: RealtimeState;
+  /** True when the leg's times include realtime. */
   realTime?: boolean;
+  /** The GTFS service date of the leg's trip, `YYYY-MM-DD`; null on a walk leg. */
   serviceDate?: string;
   from: Place;
   to: Place;
+  /** Null on a walk leg. */
   route?: Route;
   headsign?: string;
+  /** Metres. */
   distance?: number;
+  /** Seconds. */
   duration?: number;
-  accessibilityScore?: number;
+  /** Null on a walk leg. */
   trip?: Trip;
+  /** True on a transit leg ridden in the same vehicle as the previous leg: the vehicle carries on as another trip, often under another line number, and the rider stays on board. That change is not counted in `numberOfTransfers`. False on every other leg. */
   interlineWithPreviousLeg?: boolean;
   legGeometry?: Geometry;
 }

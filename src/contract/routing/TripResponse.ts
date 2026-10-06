@@ -1,7 +1,6 @@
-import type { GraphQLError } from './GraphQLError.ts';
-import type { TripData } from './TripData.ts';
+import type { TripTimetable } from './TripTimetable.ts';
 
+/** `trip` is null for an unknown id. */
 export interface TripResponse {
-  data?: TripData;
-  errors?: GraphQLError[];
+  trip?: TripTimetable;
 }

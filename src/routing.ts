@@ -3,8 +3,6 @@ import type { SpiderResult } from './result.ts';
 import { failure, success } from './result.ts';
 import type { SpiderError } from './errors.ts';
 import { DecodingError, TransportError, badRequest, httpFailure, toSpiderError } from './errors.ts';
-import { graphqlFailure } from './http.ts';
-import type { GraphQLError } from './http.ts';
 import type { BikesAllowed, InputField, RealtimeState, Reliability, RoutingErrorCode, TransitMode, WheelchairBoarding } from './enums.ts';
 import {
   bikesAllowedFromWire,
@@ -17,25 +15,26 @@ import {
 import type { Location, ViaLocation } from './location.ts';
 import { decodePolyline } from './polyline.ts';
 import { invalidServiceDate, serviceDateOf } from './serviceDate.ts';
-import { DEPARTURES, PLAN, PLAN_STREAM, TRIP } from './persistedQueries.ts';
 import type {
-  PlanConnectionData as PlanConnectionDataWire,
-  PlanConnectionStreamVariables,
-  PlanConnectionVariables,
-  PlanModesInput,
-  PlanPreferencesInput,
+  DepartureBoard,
+  DeparturesRequest,
+  DeparturesResponse,
   Itinerary as ItineraryWire,
   Leg as LegWire,
   PlanLabeledLocationInput,
+  PlanModesInput,
+  PlanPreferencesInput,
+  PlanStreamChunkEvent,
+  PlanStreamPageInfoEvent,
+  PlanStreamRequest,
+  PlanTripRequest,
+  PlanTripResponse,
   PlanViaLocationInput,
-  StopDeparturesData as StopDeparturesDataWire,
-  StopDeparturesVariables,
-  StopDeparturesStop2 as DeparturesStopWire,
   RoutingError as RoutingErrorWire,
   TransitMode as WireTransitMode,
-  TripData as TripDataWire,
-  TripVariables,
-  TripTrip as TripTripWire,
+  TripRequest,
+  TripResponse,
+  TripTimetable,
 } from './contract/routing/index.ts';
 
 export interface LatLon {
@@ -84,6 +83,7 @@ export interface Leg {
   /** True when the rider stays on board from the previous leg as the vehicle continues as another trip; not counted as a transfer. */
   readonly interlineWithPreviousLeg: boolean;
   readonly bikesAllowed: BikesAllowed | null;
+  /** @deprecated Always null. */
   readonly accessibilityScore: number | null;
   readonly fromWheelchair: WheelchairBoarding | null;
   readonly toWheelchair: WheelchairBoarding | null;
@@ -96,11 +96,13 @@ export interface Itinerary {
   readonly durationSeconds: number;
   readonly waitingTimeSeconds: number | null;
   readonly numberOfTransfers: number;
+  /** @deprecated Always null. */
   readonly accessibilityScore: number | null;
   readonly legs: readonly Leg[];
 }
 
 export interface RouteEdge {
+  /** @deprecated Always `'NoCursor'`; page with {@link Route.pageInfo}. */
   readonly cursor: string;
   readonly itinerary: Itinerary;
 }
@@ -151,7 +153,7 @@ export type PlanStreamEvent =
       readonly routingErrors: readonly RoutingError[];
     }
   | {
-      /** Terminal failure — a transport/HTTP problem, a decoding error, or a server `error` event (`bad_request` for malformed input). */
+      /** Terminal: invalid input, an HTTP or transport failure (a stream cut before `pageInfo` is `network`), or decoding. */
       readonly type: 'failure';
       readonly error: SpiderError;
     };
@@ -274,13 +276,19 @@ export interface DeparturesOptions {
   readonly timeRangeSeconds?: number;
 }
 
+const PLAN_PATH = '/routing/v1/plan';
+const PLAN_STREAM_PATH = '/routing/v1/plan-stream';
+const DEPARTURES_PATH = '/routing/v1/departures';
+const TRIP_PATH = '/routing/v1/trip';
+const NO_CURSOR = 'NoCursor';
+
 const DEFAULT_SEARCH_WINDOW_MINUTES = 60;
 const DEFAULT_NUMBER_OF_DEPARTURES = 30;
 const MAX_TIME_RANGE_SECONDS = 24 * 60 * 60;
 // Fixed platform limits; the env-set ones (search window, result count, via count) are the server's to check.
 const MIN_STREAM_WINDOW_MINUTES = 120;
 const MAX_VIA_STOP_IDS = 10;
-const MAX_VIA_WAIT_SECONDS = 24 * 60 * 60;
+const MAX_VIA_WAIT_SECONDS = 60 * 60;
 
 // The OTP transit modes valid in a modes filter — the public TransitMode union also carries street/leg
 // values (WALK, BICYCLE, CAR, TRANSIT, UNKNOWN) that are not transit modes and must not reach the wire.
@@ -370,9 +378,7 @@ export class SpiderRouting {
     yield* this.openPlanStream(options, { before });
   }
 
-  // Builds the SSE request variables from the public options plus an optional raw continuation cursor. Forward
-  // paging sets `after`, backward sets `before`; an initial stream sets neither.
-  private streamVariables(options: PlanStreamRequestOptions, cursor?: StreamCursor): PlanConnectionStreamVariables {
+  private streamBody(options: PlanStreamRequestOptions, cursor?: PageCursor): PlanStreamRequest {
     const time: RouteTimeSpec = options.arriveBy != null
       ? { kind: 'arriveBy', epochMs: toEpochMs(options.arriveBy) }
       : { kind: 'departAt', epochMs: toEpochMs(options.departAt ?? Date.now()) };
@@ -391,16 +397,12 @@ export class SpiderRouting {
       targetResults: options.targetResults,
       maxWindow: `PT${Math.floor(options.maxWindowMinutes)}M`,
       reliability: options.reliability,
-      before: cursor?.before,
-      after: cursor?.after,
+      ...cursor,
     };
   }
 
-  // Opens the SSE `plan-stream` request and turns its `chunk`/`pageInfo`/`done`/`error` records into a
-  // PlanStreamEvent stream. Invalid options, a non-2xx response, a transport error, or a decoding slip becomes a
-  // terminal `failure` event rather than a throw. Reading stops when the server closes the stream or the
-  // consumer stops iterating (which cancels the reader → aborts the request).
-  private async *openPlanStream(options: PlanStreamRequestOptions, cursor?: StreamCursor): AsyncGenerator<PlanStreamEvent> {
+  // Never throws: every failure, a stream cut before its `pageInfo` included, is one terminal `failure` event.
+  private async *openPlanStream(options: PlanStreamRequestOptions, cursor?: PageCursor): AsyncGenerator<PlanStreamEvent> {
     const invalid = invalidStreamOptions(options);
     if (invalid != null) {
       yield { type: 'failure', error: invalid };
@@ -408,13 +410,13 @@ export class SpiderRouting {
     }
     let response: Response;
     try {
-      response = await this.transport.stream(PLAN_STREAM, this.streamVariables(options, cursor));
+      response = await this.transport.stream(PLAN_STREAM_PATH, this.streamBody(options, cursor));
     } catch (e) {
       yield { type: 'failure', error: toSpiderError(e) };
       return;
     }
     if (!response.ok) {
-      yield { type: 'failure', error: toSpiderError(httpFailure('routing plan-stream', response.status, await drainText(response))) };
+      yield { type: 'failure', error: toSpiderError(httpFailure(`POST ${PLAN_STREAM_PATH}`, response.status, await drainText(response))) };
       return;
     }
     const body = response.body;
@@ -425,38 +427,27 @@ export class SpiderRouting {
     const reader = body.getReader();
     const decoder = new TextDecoder();
     let buffer = '';
-    // The gateway answers some rejections (e.g. a missing required variable) with a 2xx GraphQL JSON body
-    // before any event, so a body that opens with `{` is read whole and mapped like a batch response.
-    let json: boolean | undefined = (response.headers.get('content-type') ?? '').includes('json') ? true : undefined;
+    let sawPageInfo = false;
     try {
       for (;;) {
         const { value, done } = await reader.read();
         if (done) break;
         buffer = (buffer + decoder.decode(value, { stream: true })).replace(/\r\n/g, '\n');
-        if (json === undefined) {
-          const head = buffer.trimStart();
-          if (head !== '') json = head.startsWith('{');
-        }
-        if (json !== false) continue;
-        // SSE records are separated by a blank line; parse every complete one and keep the remainder buffered.
+        // A record still unterminated at close is discarded, per the SSE rules.
         let boundary: number;
         while ((boundary = buffer.indexOf('\n\n')) !== -1) {
           const record = parseSseFrame(buffer.slice(0, boundary));
           buffer = buffer.slice(boundary + 2);
           const event = parsePlanStreamRecord(record.event, record.data);
-          if (event != null) yield event;
+          if (event == null) continue;
+          yield event;
+          if (event.type === 'failure') return;
+          if (event.type === 'done') sawPageInfo = true;
         }
       }
-      if (json === true) {
-        yield { type: 'failure', error: streamErrorToSpiderError(buffer) };
-        return;
-      }
-      // A trailing record the server didn't terminate with a blank line before closing.
-      const record = parseSseFrame(buffer);
-      const event = parsePlanStreamRecord(record.event, record.data);
-      if (event != null) yield event;
+      if (!sawPageInfo) yield { type: 'failure', error: { code: 'network', message: 'routing plan-stream ended before pageInfo' } };
     } catch (e) {
-      yield { type: 'failure', error: toSpiderError(e) };
+      if (!sawPageInfo) yield { type: 'failure', error: toSpiderError(e) };
     } finally {
       await reader.cancel().catch(() => {});
     }
@@ -465,13 +456,13 @@ export class SpiderRouting {
   async planNext(route: Route): Promise<SpiderResult<Route> | null> {
     if (!route.pageInfo.hasNextPage) return null;
     // Forward paging = after (no count; the server returns a whole window per page).
-    return this.page(requestOf(route), undefined, route.pageInfo.endCursor ?? undefined);
+    return this.page(requestOf(route), cursorOf('after', route.pageInfo.endCursor));
   }
 
   async planPrevious(route: Route): Promise<SpiderResult<Route> | null> {
     if (!route.pageInfo.hasPreviousPage) return null;
     // Backward paging = before (no count; the server returns a whole window per page).
-    return this.page(requestOf(route), route.pageInfo.startCursor ?? undefined, undefined);
+    return this.page(requestOf(route), cursorOf('before', route.pageInfo.startCursor));
   }
 
   /**
@@ -486,14 +477,13 @@ export class SpiderRouting {
     const timeRange = Math.floor(options?.timeRangeSeconds ?? MAX_TIME_RANGE_SECONDS);
     if (!(timeRange > 0 && timeRange <= MAX_TIME_RANGE_SECONDS)) return failure(badRequest('timeRange'));
     try {
-      const variables: StopDeparturesVariables = {
+      const body: DeparturesRequest = {
         id: stopId,
         numberOfDepartures,
         startTime: options?.startTime != null ? Math.floor(toEpochMs(options.startTime) / 1000) : undefined,
         timeRange,
       };
-      const data = await this.transport.graphql<StopDeparturesDataWire>(DEPARTURES, variables);
-      const stop = data.asStop ?? data.asStation;
+      const stop = (await this.transport.postJson<DeparturesResponse>(DEPARTURES_PATH, body)).stop;
       if (stop == null) {
         throw new TransportError('no_data', `routing returned no stop or station for id=${stopId}`);
       }
@@ -508,9 +498,8 @@ export class SpiderRouting {
     const invalid = serviceDate != null ? invalidServiceDate(serviceDate) : null;
     if (invalid != null) return failure(invalid);
     try {
-      const variables: TripVariables = { id: tripId, serviceDate };
-      const data = await this.transport.graphql<TripDataWire>(TRIP, variables);
-      const trip = data.trip;
+      const body: TripRequest = { id: tripId, serviceDate };
+      const trip = (await this.transport.postJson<TripResponse>(TRIP_PATH, body)).trip;
       if (trip == null) {
         throw new TransportError('no_data', `routing returned no trip for id=${tripId}`);
       }
@@ -520,28 +509,20 @@ export class SpiderRouting {
     }
   }
 
-  private async page(
-    request: PlanRequest,
-    before?: string,
-    after?: string,
-  ): Promise<SpiderResult<Route>> {
+  private async page(request: PlanRequest, cursor?: PageCursor): Promise<SpiderResult<Route>> {
     try {
-      return success(await this.fetchPlan(request, before, after));
+      return success(await this.fetchPlan(request, cursor));
     } catch (e) {
       return failure(toSpiderError(e));
     }
   }
 
-  private async fetchPlan(
-    request: PlanRequest,
-    before?: string,
-    after?: string,
-  ): Promise<Route> {
+  private async fetchPlan(request: PlanRequest, cursor?: PageCursor): Promise<Route> {
     const iso = new Date(request.time.epochMs).toISOString();
     const dateTime = request.time.kind === 'departAt'
       ? { earliestDeparture: iso }
       : { latestArrival: iso };
-    const variables: PlanConnectionVariables = {
+    const body: PlanTripRequest = {
       dateTime,
       origin: locationToInput(request.origin),
       destination: locationToInput(request.destination),
@@ -550,16 +531,11 @@ export class SpiderRouting {
       preferences: preferencesInput(request),
       searchWindow: `PT${Math.floor(request.searchWindowMinutes)}M`,
       reliability: request.reliability,
-      before,
-      after,
+      ...cursor,
     };
-    const data = await this.transport.graphql<PlanConnectionDataWire>(PLAN, variables);
-    const plan = data.planConnection;
-    if (plan == null) {
-      throw new TransportError('no_data', 'routing returned no plan data');
-    }
+    const plan = await this.transport.postJson<PlanTripResponse>(PLAN_PATH, body);
     const route: Route = {
-      edges: (plan.edges ?? []).map((edge) => ({ cursor: edge.cursor, itinerary: mapItinerary(edge.node) })),
+      edges: plan.itineraries.map((itinerary) => ({ cursor: NO_CURSOR, itinerary: mapItinerary(itinerary) })),
       pageInfo: {
         startCursor: plan.pageInfo.startCursor ?? null,
         endCursor: plan.pageInfo.endCursor ?? null,
@@ -582,7 +558,12 @@ function toEpochMs(value: number | Date): number {
   return typeof value === 'number' ? value : value.getTime();
 }
 
-type StreamCursor = { readonly after?: string; readonly before?: string };
+type PageCursor = { readonly after: string } | { readonly before: string };
+
+function cursorOf(kind: 'after' | 'before', cursor: string | null): PageCursor | undefined {
+  if (cursor == null) return undefined;
+  return kind === 'after' ? { after: cursor } : { before: cursor };
+}
 
 function invalidStreamOptions(options: PlanStreamRequestOptions): SpiderError | null {
   // Required by the type; a plain-JS caller can still omit it, and `PTNaNM` must never reach the wire.
@@ -593,10 +574,11 @@ function invalidStreamOptions(options: PlanStreamRequestOptions): SpiderError | 
 
 function invalidVia(via: readonly ViaLocation[]): SpiderError | null {
   for (const v of via) {
-    const valid = v.kind === 'passThrough'
-      ? v.stopIds.length >= 1 && v.stopIds.length <= MAX_VIA_STOP_IDS
-      : v.minimumWaitSeconds >= 0 && v.minimumWaitSeconds <= MAX_VIA_WAIT_SECONDS;
-    if (!valid) return badRequest('via');
+    if (v.kind === 'passThrough') {
+      if (!(v.stopIds.length >= 1 && v.stopIds.length <= MAX_VIA_STOP_IDS)) return badRequest('via');
+    } else if (!(v.minimumWaitSeconds >= 0 && v.minimumWaitSeconds <= MAX_VIA_WAIT_SECONDS)) {
+      return badRequest('via.visit.minimumWaitTime');
+    }
   }
   return null;
 }
@@ -612,16 +594,9 @@ function viaToInput(via: ViaLocation): PlanViaLocationInput {
   if (via.kind === 'passThrough') {
     return { passThrough: { stopLocationIds: [...via.stopIds] } };
   }
+  if (via.location.kind !== 'stop') throw new TransportError('bad_request', 'via is invalid', undefined, undefined, 'via');
   const minimumWaitTime = via.minimumWaitSeconds > 0 ? `PT${via.minimumWaitSeconds}S` : undefined;
-  if (via.location.kind === 'stop') {
-    return { visit: { stopLocationIds: [via.location.id], minimumWaitTime } };
-  }
-  return {
-    visit: {
-      coordinate: { latitude: via.location.latitude, longitude: via.location.longitude },
-      minimumWaitTime,
-    },
-  };
+  return { visit: { stopLocationIds: [via.location.id], minimumWaitTime } };
 }
 
 // Curated PlanRequest → OTP's nested modes/preferences inputs. Only the exposed fields are set; everything
@@ -669,12 +644,12 @@ export function parsePlanStreamRecord(event: string, data: string): PlanStreamEv
   if (data.trim() === '') return null;
   switch (event) {
     case 'chunk':
-      return decodeStreamRecord('chunk', data, (chunk: StreamChunkWire) => ({
+      return decodeStreamRecord('chunk', data, (chunk: PlanStreamChunkEvent) => ({
         type: 'result',
         itineraries: (chunk.results ?? []).map(mapItinerary),
       }));
     case 'pageInfo':
-      return decodeStreamRecord('pageInfo', data, (page: StreamPageInfoWire) => ({
+      return decodeStreamRecord('pageInfo', data, (page: PlanStreamPageInfoEvent) => ({
         type: 'done',
         pageInfo: {
           startCursor: page.startCursor ?? null,
@@ -685,8 +660,6 @@ export function parsePlanStreamRecord(event: string, data: string): PlanStreamEv
         },
         routingErrors: (page.routingErrors ?? []).map(mapRoutingError),
       }));
-    case 'error':
-      return { type: 'failure', error: streamErrorToSpiderError(data) };
     default:
       return null;
   }
@@ -718,40 +691,12 @@ function parseSseFrame(record: string): { event: string; data: string } {
   return { event, data: data.join('\n') };
 }
 
-// A stream `error` record (or a 2xx JSON body in place of the stream) is the same GraphQL error envelope the
-// batch path returns, so it maps through the same taxonomy: a BAD_REQUEST becomes bad_request with its field.
-function streamErrorToSpiderError(data: string): SpiderError {
-  let env: { errors?: GraphQLError[]; message?: string };
-  try {
-    env = JSON.parse(data) as { errors?: GraphQLError[]; message?: string };
-  } catch {
-    return toSpiderError(new TransportError('upstream', `routing plan-stream error: ${data.slice(0, 300)}`));
-  }
-  if (env.errors != null && env.errors.length > 0) {
-    return toSpiderError(graphqlFailure('routing plan-stream', env.errors));
-  }
-  return toSpiderError(new TransportError('upstream', `routing plan-stream error: ${env.message ?? data.slice(0, 300)}`));
-}
-
 async function drainText(response: Response): Promise<string> {
   try {
     return await response.text();
   } catch {
     return '';
   }
-}
-
-interface StreamChunkWire {
-  results?: ItineraryWire[];
-}
-
-interface StreamPageInfoWire {
-  startCursor?: string | null;
-  endCursor?: string | null;
-  hasNextPage?: boolean;
-  hasPreviousPage?: boolean;
-  searchWindowUsed?: string | null;
-  routingErrors?: RoutingErrorWire[];
 }
 
 function mapRoutingError(re: RoutingErrorWire): RoutingError {
@@ -765,7 +710,7 @@ function mapItinerary(node: ItineraryWire): Itinerary {
     durationSeconds: node.duration ?? 0,
     waitingTimeSeconds: node.waitingTime ?? null,
     numberOfTransfers: node.numberOfTransfers,
-    accessibilityScore: node.accessibilityScore ?? null,
+    accessibilityScore: null,
     legs: node.legs.map(mapLeg),
   };
 }
@@ -802,14 +747,14 @@ function mapLeg(leg: LegWire): Leg {
     tripGtfsId: leg.trip?.gtfsId ?? null,
     interlineWithPreviousLeg: leg.interlineWithPreviousLeg ?? false,
     bikesAllowed: bikesAllowedFromWire(leg.trip?.bikesAllowed),
-    accessibilityScore: leg.accessibilityScore ?? null,
+    accessibilityScore: null,
     fromWheelchair: wheelchairFromWire(leg.from.stop?.wheelchairBoarding),
     toWheelchair: wheelchairFromWire(leg.to.stop?.wheelchairBoarding),
     geometry: leg.legGeometry?.points ? decodePolyline(leg.legGeometry.points) : [],
   };
 }
 
-function mapDepartures(stop: DeparturesStopWire): Departure[] {
+function mapDepartures(stop: DepartureBoard): Departure[] {
   const out: Departure[] = [];
   for (const st of stop.stoptimesWithoutPatterns ?? []) {
     const serviceDay = st.serviceDay;
@@ -839,7 +784,7 @@ function mapDepartures(stop: DeparturesStopWire): Departure[] {
   return out;
 }
 
-function mapTrip(trip: TripTripWire): TripDetails {
+function mapTrip(trip: TripTimetable): TripDetails {
   const serviceDay = trip.stoptimesForDate?.find((st) => st.serviceDay != null)?.serviceDay;
   const stops: TripStop[] = [];
   for (const st of trip.stoptimesForDate ?? []) {

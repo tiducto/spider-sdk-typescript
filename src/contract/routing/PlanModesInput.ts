@@ -1,9 +1,10 @@
-import type { PlanDirectMode } from './PlanDirectMode.ts';
 import type { PlanTransitModesInput } from './PlanTransitModesInput.ts';
 
+/** Which modes the search may use. */
 export interface PlanModesInput {
-  direct?: PlanDirectMode[];
+  /** Only a direct walk, without transit. */
   directOnly?: boolean;
-  transit?: PlanTransitModesInput;
+  /** Never a journey without a transit leg. */
   transitOnly?: boolean;
+  transit?: PlanTransitModesInput;
 }

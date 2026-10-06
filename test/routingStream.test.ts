@@ -3,7 +3,6 @@ import assert from 'node:assert/strict';
 import { Location, SpiderClient, ViaLocation } from '../src/index.ts';
 import type { PlanStreamEvent, PlanStreamRequestOptions } from '../src/index.ts';
 import { parsePlanStreamRecord } from '../src/routing.ts';
-import { PLAN_STREAM } from '../src/persistedQueries.ts';
 import type { FetchLike } from '../src/http.ts';
 import type { Captured } from './support.ts';
 
@@ -14,13 +13,9 @@ const STREAM_OPTIONS: PlanStreamRequestOptions = {
   maxWindowMinutes: 180,
 };
 
-// Guards the SSE `plan-stream` handling: the record parser that turns `chunk`/`pageInfo`/`error` frames into
-// the three PlanStreamEvents (`result`/`done`/`failure`, including realtime-delay mapping onto legs), and the
-// end-to-end request (persisted-query id + variables wire shape) and framing over a streamed response.
+const PAGE_INFO_FRAME = 'event: pageInfo\ndata: {"startCursor":"s","endCursor":"e","hasNextPage":true,"hasPreviousPage":false,"searchWindowUsed":"PT2H","routingErrors":[]}\n\n';
+const DONE_FRAME = 'event: done\ndata: {"iterations":2,"windowSeconds":7200,"resultCount":1,"stoppedBy":"targetResults"}\n\n';
 
-// A `chunk` frame → a `result` event carrying itinerary nodes; realtime delays ride on each leg's
-// estimated{time,delay} + realtimeState + realTime + serviceDate and must land on the domain Leg exactly as
-// the batch plan maps them.
 test('chunk maps itineraries with realtime delays', () => {
   const data = JSON.stringify({
     frontier: 1800,
@@ -59,6 +54,7 @@ test('chunk maps itineraries with realtime delays', () => {
   const itinerary = event.itineraries[0];
   assert.equal(itinerary.numberOfTransfers, 1);
   assert.equal(itinerary.durationSeconds, 1800);
+  assert.equal(itinerary.accessibilityScore, null);
 
   const leg = itinerary.legs[0];
   assert.equal(leg.mode, 'BUS');
@@ -82,7 +78,7 @@ test('chunk maps itineraries with realtime delays', () => {
 
 // The `pageInfo` frame is the terminal `done` event — it carries the continuation RoutePageInfo.
 test('pageInfo maps to the terminal done with continuation cursors', () => {
-  const data = JSON.stringify({ startCursor: 'c-prev', endCursor: 'c-next', hasNextPage: true, hasPreviousPage: false, searchWindowUsed: 'PT1H' });
+  const data = JSON.stringify({ startCursor: 'c-prev', endCursor: 'c-next', hasNextPage: true, hasPreviousPage: false, searchWindowUsed: 'PT1H', routingErrors: [] });
   const event = parsePlanStreamRecord('pageInfo', data);
   assert.equal(event?.type, 'done');
   if (event?.type !== 'done') return;
@@ -94,11 +90,13 @@ test('pageInfo maps to the terminal done with continuation cursors', () => {
   assert.deepEqual(event.routingErrors, []);
 });
 
-// A search that finds nothing reports why on the final pageInfo, shaped like batch planConnection's routingErrors.
 test('pageInfo routingErrors map onto done like the batch plan', () => {
   const data = JSON.stringify({
+    startCursor: null,
+    endCursor: null,
     hasNextPage: false,
     hasPreviousPage: false,
+    searchWindowUsed: null,
     routingErrors: [
       { code: 'OUTSIDE_SERVICE_PERIOD', description: 'date is outside the feed', inputField: 'DATE_TIME' },
       { code: 'LOCATION_NOT_FOUND', description: 'unknown stop' },
@@ -107,6 +105,7 @@ test('pageInfo routingErrors map onto done like the batch plan', () => {
   const event = parsePlanStreamRecord('pageInfo', data);
   assert.equal(event?.type, 'done');
   if (event?.type !== 'done') return;
+  assert.equal(event.pageInfo.searchWindowUsed, null);
   assert.deepEqual(event.routingErrors, [
     { code: 'OUTSIDE_SERVICE_PERIOD', description: 'date is outside the feed', inputField: 'DATE_TIME' },
     { code: 'LOCATION_NOT_FOUND', description: 'unknown stop', inputField: null },
@@ -119,118 +118,102 @@ test('done frame is dropped', () => {
   assert.equal(parsePlanStreamRecord('done', data), null);
 });
 
-// A stream `error` record is the GraphQL error envelope; a top-level BAD_REQUEST becomes a typed bad_request.
-test('error event maps to a typed bad_request failure', () => {
-  const data = JSON.stringify({ data: null, errors: [{ message: 'searchWindow is out of range', extensions: { code: 'BAD_REQUEST', field: 'searchWindow' } }] });
-  const event = parsePlanStreamRecord('error', data);
-  assert.equal(event?.type, 'failure');
-  if (event?.type !== 'failure') return;
-  assert.equal(event.error.code, 'bad_request');
-  assert.equal(event.error.field, 'searchWindow');
-  assert.equal(event.error.message, 'searchWindow is out of range');
-});
-
-test('heartbeats and unknown events are ignored', () => {
+test('heartbeats, error and other unknown events are ignored', () => {
   assert.equal(parsePlanStreamRecord('message', ''), null);
   assert.equal(parsePlanStreamRecord('weird', JSON.stringify({ x: 1 })), null);
+  assert.equal(parsePlanStreamRecord('error', JSON.stringify({ code: 'bad_request', message: 'targetResults is required' })), null);
 });
 
-// Feeds an SSE byte stream through the full planStream: pins the request (persisted id + variables wire shape),
-// that it opens a fresh stream (no cursors), and that framing across read boundaries yields result → done in
-// order (the wire `done` telemetry frame is dropped).
-test('planStream posts the persisted query and streams result then done events', async () => {
+test('a malformed chunk is a terminal decoding failure', () => {
+  const event = parsePlanStreamRecord('chunk', '{not json');
+  assert.equal(event?.type === 'failure' && event.error.code, 'decoding');
+});
+
+test('planStream POSTs the REST body to /routing/v1/plan-stream and streams result then done events', async () => {
   const frames = [
-    'event: chunk\ndata: {"results":[{"numberOfTransfers":0,"start":"2026-07-15T08:00:00Z","end":"2026-07-15T08:20:00Z","duration":1200,"legs":[]}]}\n\n',
+    'event: chunk\ndata: {"frontier":600,"found":1,"finalized":1,"results":[{"numberOfTransfers":0,"start":"2026-07-15T08:00:00Z","end":"2026-07-15T08:20:00Z","duration":1200,"legs":[]}]}\n\n',
+    'event: progress\ndata: {"frontier":1200}\n\n',
     // A record split across two reads exercises the cross-chunk buffering.
     'event: pageInfo\ndata: {"startCursor":"a","endCursor":',
-    '"b","hasNextPage":true,"hasPreviousPage":false}\n\n',
-    'event: done\ndata: {"iterations":2,"windowSeconds":1800,"resultCount":1,"stoppedBy":"targetResults"}\n\n',
+    '"b","hasNextPage":true,"hasPreviousPage":false,"searchWindowUsed":"PT20M","routingErrors":[]}\n\n',
+    DONE_FRAME,
   ];
   const mock = sseFetch(frames);
   const client = new SpiderClient('https://brno.api.tiducto.eu', 'k', { fetch: mock.fetch });
 
-  const events: PlanStreamEvent[] = [];
-  for await (const ev of client.routing.planStream({
+  const events = await collect(client.routing.planStream({
     origin: Location.stop('1:A'),
     destination: Location.coordinate(49.2, 16.6),
+    departAt: new Date('2026-07-15T08:00:00Z'),
     via: [ViaLocation.passThrough('1:V')],
     targetResults: 5,
     maxWindowMinutes: 180,
     reliability: 'SAFE',
-  })) {
-    events.push(ev);
-  }
+  }));
 
   assert.equal(mock.calls.length, 1);
   const call = mock.calls[0];
-  assert.equal(call.url, 'https://brno.api.tiducto.eu/routing/plan-stream');
+  assert.equal(call.url, 'https://brno.api.tiducto.eu/routing/v1/plan-stream');
   assert.equal(call.method, 'POST');
   assert.equal(call.headers.get('apikey'), 'k');
-  const body = JSON.parse(call.body);
-  assert.equal(body.id, PLAN_STREAM.id);
-  assert.deepEqual(body.variables.origin, { location: { stopLocation: { stopLocationId: '1:A' } } });
-  assert.deepEqual(body.variables.via, [{ passThrough: { stopLocationIds: ['1:V'] } }]);
-  assert.equal(body.variables.targetResults, 5);
-  assert.equal(body.variables.maxWindow, 'PT180M');
-  assert.equal(body.variables.reliability, 'SAFE');
+  assert.equal(call.headers.get('accept'), 'text/event-stream');
+  assert.equal(call.headers.get('content-type'), 'application/json');
   // A fresh stream sends no continuation cursors.
-  assert.equal(body.variables.after, undefined);
-  assert.equal(body.variables.before, undefined);
+  assert.equal(
+    call.body,
+    '{"dateTime":{"earliestDeparture":"2026-07-15T08:00:00.000Z"},'
+      + '"origin":{"location":{"stopLocation":{"stopLocationId":"1:A"}}},'
+      + '"destination":{"location":{"coordinate":{"latitude":49.2,"longitude":16.6}}},'
+      + '"via":[{"passThrough":{"stopLocationIds":["1:V"]}}],'
+      + '"targetResults":5,"maxWindow":"PT180M","reliability":"SAFE"}',
+  );
 
   assert.deepEqual(events.map((e) => e.type), ['result', 'done']);
   const [result, done] = events;
   assert.equal(result.type === 'result' && result.itineraries.length, 1);
   assert.equal(done.type === 'done' && done.pageInfo.endCursor, 'b');
   assert.equal(done.type === 'done' && done.pageInfo.hasNextPage, true);
+  assert.equal(done.type === 'done' && done.pageInfo.searchWindowUsed, 'PT20M');
 });
 
 // planStreamNext continues a stream forward: same options plus a raw `endCursor`, sent as `after`.
 test('planStreamNext continues forward from a done endCursor via after', async () => {
-  const frames = ['event: pageInfo\ndata: {"startCursor":"n0","endCursor":"n1","hasNextPage":false,"hasPreviousPage":true}\n\n'];
-  const mock = sseFetch(frames);
+  const mock = sseFetch([PAGE_INFO_FRAME, DONE_FRAME]);
   const client = new SpiderClient('https://brno.api.tiducto.eu', 'k', { fetch: mock.fetch });
 
-  const events: PlanStreamEvent[] = [];
-  for await (const ev of client.routing.planStreamNext(
+  const events = await collect(client.routing.planStreamNext(
     { origin: Location.stop('1:A'), destination: Location.stop('1:B'), targetResults: 8, maxWindowMinutes: 120 },
     'cursor-end',
-  )) {
-    events.push(ev);
-  }
+  ));
 
   assert.equal(mock.calls.length, 1);
+  assert.equal(mock.calls[0].url, 'https://brno.api.tiducto.eu/routing/v1/plan-stream');
   const body = JSON.parse(mock.calls[0].body);
-  assert.equal(body.id, PLAN_STREAM.id);
-  assert.equal(body.variables.after, 'cursor-end');
-  assert.equal(body.variables.before, undefined);
-  assert.equal(body.variables.targetResults, 8);
-  assert.equal(body.variables.maxWindow, 'PT120M');
-  // No reliability requested = plan on the timetable: the variable is left out, not defaulted.
-  assert.equal('reliability' in body.variables, false);
+  assert.equal(body.after, 'cursor-end');
+  assert.equal('before' in body, false);
+  assert.equal(body.targetResults, 8);
+  assert.equal(body.maxWindow, 'PT120M');
+  assert.equal('reliability' in body, false);
   assert.deepEqual(events.map((e) => e.type), ['done']);
 });
 
 // planStreamPrevious continues a stream backward: same options plus a raw `startCursor`, sent as `before`.
 test('planStreamPrevious continues backward from a done startCursor via before', async () => {
-  const frames = ['event: pageInfo\ndata: {"startCursor":"p0","endCursor":"p1","hasNextPage":true,"hasPreviousPage":false}\n\n'];
-  const mock = sseFetch(frames);
+  const mock = sseFetch([PAGE_INFO_FRAME, DONE_FRAME]);
   const client = new SpiderClient('https://brno.api.tiducto.eu', 'k', { fetch: mock.fetch });
 
-  const events: PlanStreamEvent[] = [];
-  for await (const ev of client.routing.planStreamPrevious({ ...STREAM_OPTIONS, reliability: 'VERY_SAFE' }, 'cursor-start')) {
-    events.push(ev);
-  }
+  const events = await collect(client.routing.planStreamPrevious({ ...STREAM_OPTIONS, reliability: 'VERY_SAFE' }, 'cursor-start'));
 
   assert.equal(mock.calls.length, 1);
   const body = JSON.parse(mock.calls[0].body);
-  assert.equal(body.variables.before, 'cursor-start');
-  assert.equal(body.variables.after, undefined);
-  assert.equal(body.variables.reliability, 'VERY_SAFE');
+  assert.equal(body.before, 'cursor-start');
+  assert.equal('after' in body, false);
+  assert.equal(body.reliability, 'VERY_SAFE');
   assert.deepEqual(events.map((e) => e.type), ['done']);
 });
 
 test('planStream rejects a maxWindow under 2 h, or none, before any request', async () => {
-  const mock = sseFetch(['event: pageInfo\ndata: {"hasNextPage":false,"hasPreviousPage":false}\n\n']);
+  const mock = sseFetch([PAGE_INFO_FRAME, DONE_FRAME]);
   const client = new SpiderClient('https://x', 'k', { fetch: mock.fetch });
 
   const cases: [PlanStreamRequestOptions, string][] = [
@@ -250,59 +233,112 @@ test('planStream rejects a maxWindow under 2 h, or none, before any request', as
   assert.equal(mock.calls.length, 0);
 
   await collect(client.routing.planStream({ ...STREAM_OPTIONS, maxWindowMinutes: 120 }));
-  assert.equal(JSON.parse(mock.calls[0].body).variables.maxWindow, 'PT120M');
+  assert.equal(JSON.parse(mock.calls[0].body).maxWindow, 'PT120M');
 });
 
 test('planStream and its continuations reject an out-of-range via before any request', async () => {
   const mock = sseFetch([]);
   const client = new SpiderClient('https://x', 'k', { fetch: mock.fetch });
-  const options = { ...STREAM_OPTIONS, via: [ViaLocation.passThrough()] };
+
+  for (const [via, field] of [
+    [ViaLocation.passThrough(), 'via'],
+    [ViaLocation.visit(Location.stop('1:V'), 3601), 'via.visit.minimumWaitTime'],
+  ] as const) {
+    const options = { ...STREAM_OPTIONS, via: [via] };
+    for (const stream of [
+      client.routing.planStream(options),
+      client.routing.planStreamNext(options, 'c'),
+      client.routing.planStreamPrevious(options, 'c'),
+    ]) {
+      const [ev] = await collect(stream);
+      assert.equal(ev.type === 'failure' && ev.error.field, field);
+    }
+  }
+  assert.equal(mock.calls.length, 0);
+});
+
+test('planStream rejects a visit to a coordinate as via is invalid before any request', async () => {
+  const mock = sseFetch([PAGE_INFO_FRAME, DONE_FRAME]);
+  const client = new SpiderClient('https://x', 'k', { fetch: mock.fetch });
+  const options = { ...STREAM_OPTIONS, via: [ViaLocation.visit(Location.coordinate(49.2, 16.6))] };
 
   for (const stream of [
     client.routing.planStream(options),
     client.routing.planStreamNext(options, 'c'),
     client.routing.planStreamPrevious(options, 'c'),
   ]) {
-    const [ev] = await collect(stream);
-    assert.equal(ev.type === 'failure' && ev.error.field, 'via');
-  }
-  assert.equal(mock.calls.length, 0);
-});
-
-// The gateway rejects a missing required variable with a 2xx GraphQL JSON body instead of an event stream.
-test('a 2xx JSON body in place of the stream maps like a batch BAD_REQUEST', async () => {
-  const body = JSON.stringify({ data: null, errors: [{ message: 'targetResults is required', extensions: { code: 'BAD_REQUEST', field: 'targetResults' } }] });
-  for (const headers of [{ 'content-type': 'application/json' }, undefined]) {
-    const fetch: FetchLike = async () => new Response(body, { status: 200, headers });
-    const client = new SpiderClient('https://x', 'k', { fetch });
-
-    const events = await collect(client.routing.planStream(STREAM_OPTIONS));
-
+    const events = await collect(stream);
     assert.equal(events.length, 1);
     const ev = events[0];
     assert.equal(ev.type, 'failure');
     if (ev.type === 'failure') {
       assert.equal(ev.error.code, 'bad_request');
-      assert.equal(ev.error.field, 'targetResults');
-      assert.equal(ev.error.message, 'targetResults is required');
+      assert.equal(ev.error.field, 'via');
+      assert.equal(ev.error.message, 'via is invalid');
     }
+  }
+  assert.equal(mock.calls.length, 0);
+});
+
+test('a stream that ends before pageInfo is a network failure after the events it sent', async () => {
+  const chunk = 'event: chunk\ndata: {"frontier":600,"found":1,"finalized":1,"results":[]}\n\n';
+  const cases: [Response, string[]][] = [
+    [streamResponse([chunk]), ['result', 'failure']],
+    [streamResponse([]), ['failure']],
+    [streamResponse([chunk], new TypeError('terminated')), ['result', 'failure']],
+    [streamResponse(['event: chunk\ndata: {"frontier":600,"found":1,"fin']), ['failure']],
+    [streamResponse([chunk, 'event: pageInfo\ndata: {"startCursor":"s","endCu']), ['result', 'failure']],
+    [streamResponse([chunk, PAGE_INFO_FRAME.trimEnd()]), ['result', 'failure']],
+    [new Response(JSON.stringify({ itineraries: [] }), { status: 200, headers: { 'content-type': 'application/json' } }), ['failure']],
+  ];
+  for (const [response, types] of cases) {
+    const client = new SpiderClient('https://x', 'k', { fetch: (async () => response) as FetchLike });
+
+    const events = await collect(client.routing.planStream(STREAM_OPTIONS));
+
+    assert.deepEqual(events.map((e) => e.type), types);
+    const last = events[events.length - 1];
+    assert.equal(last.type === 'failure' && last.error.code, 'network');
   }
 });
 
-test('planStream surfaces a retired persisted query as a query_retired failure', async () => {
-  const fetch: FetchLike = async () =>
-    new Response(JSON.stringify({ error: 'query_retired', message: 'persisted query is retired' }), { status: 410 });
-  const client = new SpiderClient('https://x', 'k', { fetch });
+test('a stream cut after its pageInfo ends with that done, not a failure', async () => {
+  for (const response of [streamResponse([PAGE_INFO_FRAME], new TypeError('terminated')), streamResponse([PAGE_INFO_FRAME])]) {
+    const client = new SpiderClient('https://x', 'k', { fetch: (async () => response) as FetchLike });
+
+    const events = await collect(client.routing.planStream(STREAM_OPTIONS));
+
+    assert.deepEqual(events.map((e) => e.type), ['done']);
+  }
+});
+
+test('a malformed frame ends the stream with that decoding failure', async () => {
+  const mock = sseFetch(['event: chunk\ndata: {not json\n\n', PAGE_INFO_FRAME, DONE_FRAME]);
+  const client = new SpiderClient('https://x', 'k', { fetch: mock.fetch });
 
   const events = await collect(client.routing.planStream(STREAM_OPTIONS));
+
+  assert.deepEqual(events.map((e) => e.type), ['failure']);
+  assert.equal(events[0].type === 'failure' && events[0].error.code, 'decoding');
+});
+
+test('planStream surfaces a 400 sent before the stream as bad_request naming the field', async () => {
+  const fetch: FetchLike = async () => new Response(
+    JSON.stringify({ code: 'bad_request', message: 'targetResults is out of range', field: 'targetResults' }),
+    { status: 400, headers: { 'content-type': 'application/json' } },
+  );
+  const client = new SpiderClient('https://x', 'k', { fetch });
+
+  const events = await collect(client.routing.planStream({ ...STREAM_OPTIONS, targetResults: 500 }));
 
   assert.equal(events.length, 1);
   const ev = events[0];
   assert.equal(ev.type, 'failure');
   if (ev.type === 'failure') {
-    assert.equal(ev.error.code, 'query_retired');
-    assert.equal(ev.error.httpStatus, 410);
-    assert.equal(ev.error.message, 'persisted query is retired');
+    assert.equal(ev.error.code, 'bad_request');
+    assert.equal(ev.error.httpStatus, 400);
+    assert.equal(ev.error.field, 'targetResults');
+    assert.equal(ev.error.message, 'POST /routing/v1/plan-stream -> 400: targetResults is out of range');
   }
 });
 
@@ -353,6 +389,19 @@ async function collect(stream: AsyncGenerator<PlanStreamEvent>): Promise<PlanStr
   return events;
 }
 
+function streamResponse(frames: readonly string[], cut?: Error): Response {
+  const encoder = new TextEncoder();
+  let next = 0;
+  const stream = new ReadableStream<Uint8Array>({
+    pull(controller) {
+      if (next < frames.length) controller.enqueue(encoder.encode(frames[next++]));
+      else if (cut != null) controller.error(cut);
+      else controller.close();
+    },
+  });
+  return new Response(stream, { status: 200, headers: { 'content-type': 'text/event-stream' } });
+}
+
 function sseFetch(frames: readonly string[]): { fetch: FetchLike; calls: Captured[] } {
   const calls: Captured[] = [];
   const fetch = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
@@ -362,14 +411,7 @@ function sseFetch(frames: readonly string[]): { fetch: FetchLike; calls: Capture
       headers: new Headers(init?.headers),
       body: typeof init?.body === 'string' ? init.body : '',
     });
-    const encoder = new TextEncoder();
-    const stream = new ReadableStream<Uint8Array>({
-      start(controller) {
-        for (const frame of frames) controller.enqueue(encoder.encode(frame));
-        controller.close();
-      },
-    });
-    return new Response(stream, { status: 200 });
+    return streamResponse(frames);
   };
   return { fetch: fetch as FetchLike, calls };
 }

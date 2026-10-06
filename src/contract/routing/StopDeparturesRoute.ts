@@ -5,6 +5,8 @@ export interface StopDeparturesRoute {
   shortName?: string;
   longName?: string;
   mode?: TransitMode;
+  /** Hex without `#`; null when the feed has none. */
   color?: string;
+  /** Hex without `#`; null when the feed has none. */
   textColor?: string;
 }
