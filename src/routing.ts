@@ -279,10 +279,10 @@ export interface DeparturesOptions {
   readonly timeRangeSeconds?: number;
 }
 
-const PLAN_PATH = '/routing/plan';
-const PLAN_STREAM_PATH = '/routing/plan-stream';
-const DEPARTURES_PATH = '/routing/departures';
-const TRIP_PATH = '/routing/trip';
+const PLAN_PATH = '/routing/v1/plan';
+const PLAN_STREAM_PATH = '/routing/v1/plan-stream';
+const DEPARTURES_PATH = '/routing/v1/departures';
+const TRIP_PATH = '/routing/v1/trip';
 const NO_CURSOR = 'NoCursor';
 
 const DEFAULT_SEARCH_WINDOW_MINUTES = 60;

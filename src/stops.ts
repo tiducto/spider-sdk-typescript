@@ -75,7 +75,7 @@ export class SpiderStops {
     const body = buildSearchRequest(filter);
     if (!(Number.isInteger(body.limit) && body.limit >= 1 && body.limit <= MAX_LIMIT)) return failure(badRequest('limit'));
     try {
-      const response = await this.transport.postJson<StopSearchResponseWire>('/stops/search', body, extractStopError);
+      const response = await this.transport.postJson<StopSearchResponseWire>('/stops/v1/search', body, extractStopError);
       return success(response.hits.map(toStop));
     } catch (e) {
       return failure(toSpiderError(e));
@@ -85,7 +85,7 @@ export class SpiderStops {
   /** Look up a single stop by its GTFS id. Resolves to the stop, or `null` when no stop matches. */
   async byId(gtfsId: string): Promise<Stop | null> {
     const body: StopSearchRequestWire = { q: '', filter: `gtfsId = "${escapeFilter(gtfsId)}"`, limit: 1 };
-    const response = await this.transport.postJson<StopSearchResponseWire>('/stops/search', body, extractStopError);
+    const response = await this.transport.postJson<StopSearchResponseWire>('/stops/v1/search', body, extractStopError);
     const hit = response.hits[0];
     return hit != null ? toStop(hit) : null;
   }

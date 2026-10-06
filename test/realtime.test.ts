@@ -15,7 +15,7 @@ test('vehicles maps positions, missing and freshness', async () => {
   const client = new SpiderClient('https://x', 'k', { fetch: mock.fetch });
   const result = await client.realtime.vehicles(['t1', 't2']);
 
-  assert.equal(mock.calls[0].url, 'https://x/realtime/vehicles?tripIds=t1%2Ct2');
+  assert.equal(mock.calls[0].url, 'https://x/realtime/v1/vehicles?tripIds=t1%2Ct2');
   assert.equal(mock.calls[0].headers.get('apikey'), 'k');
   if (!result.isSuccess) throw new Error(result.error.code);
   assert.equal(result.data.vehicles.length, 1);
@@ -40,7 +40,7 @@ test('vehicleForTrip treats 404 as no vehicle reporting', async () => {
   const mock = mockFetch({ status: 404, text: 'not found' });
   const client = new SpiderClient('https://x', 'k', { fetch: mock.fetch });
   const result = await client.realtime.vehicleForTrip('t1');
-  assert.equal(mock.calls[0].url, 'https://x/realtime/vehicles/by-trip/t1');
+  assert.equal(mock.calls[0].url, 'https://x/realtime/v1/vehicles/by-trip/t1');
   if (!result.isSuccess) throw new Error(result.error.code);
   assert.equal(result.data.vehicle, null);
 });
@@ -83,7 +83,7 @@ test('delays posts grouped queries and maps per-service-date results', async () 
   const result = await client.realtime.delays(['t1', 't2'], '2026-07-19');
 
   const call = mock.calls[0];
-  assert.equal(call.url, 'https://x/realtime/delays');
+  assert.equal(call.url, 'https://x/realtime/v1/delays');
   assert.equal(call.method, 'POST');
   assert.deepEqual(JSON.parse(call.body), { queries: [{ serviceDate: '2026-07-19', tripIds: ['t1', 't2'] }] });
 
@@ -146,7 +146,7 @@ test('alerts maps text and active periods', async () => {
   });
   const client = new SpiderClient('https://x', 'k', { fetch: mock.fetch });
   const result = await client.realtime.alerts();
-  assert.equal(mock.calls[0].url, 'https://x/realtime/alerts');
+  assert.equal(mock.calls[0].url, 'https://x/realtime/v1/alerts');
   if (!result.isSuccess) throw new Error(result.error.code);
   assert.equal(result.data.alerts.length, 1);
   assert.equal(result.data.alerts[0].headerText, 'H');

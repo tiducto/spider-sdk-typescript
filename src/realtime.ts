@@ -123,7 +123,7 @@ export class SpiderRealtime {
     if (tripIds.length === 0) return success(EMPTY_POSITIONS);
     if (tripIds.length > MAX_TRIP_IDS) return failure(badRequest('tripIds'));
     try {
-      const dto = await this.transport.getJson<VehiclesResponseWire>('/realtime/vehicles', {
+      const dto = await this.transport.getJson<VehiclesResponseWire>('/realtime/v1/vehicles', {
         tripIds: tripIds.join(','),
       });
       return success({
@@ -137,7 +137,7 @@ export class SpiderRealtime {
   }
 
   async vehicleForTrip(tripId: string): Promise<SpiderResult<LiveVehicleUpdate>> {
-    const path = `/realtime/vehicles/by-trip/${encodeURIComponent(tripId)}`;
+    const path = `/realtime/v1/vehicles/by-trip/${encodeURIComponent(tripId)}`;
     try {
       const raw = await this.transport.getRaw(path);
       if (!raw.ok) {
@@ -184,7 +184,7 @@ export class SpiderRealtime {
     if (total > MAX_TRIP_IDS) return failure(badRequest('tripIds'));
     try {
       const request: DelaysRequestWire = { queries };
-      const dto = await this.transport.postJson<DelaysResponseWire>('/realtime/delays', request);
+      const dto = await this.transport.postJson<DelaysResponseWire>('/realtime/v1/delays', request);
       return success({
         groups: (dto.results ?? []).map(mapGroupResult),
         freshness: mapFreshness(dto),
@@ -196,7 +196,7 @@ export class SpiderRealtime {
 
   async alerts(): Promise<SpiderResult<ServiceAlerts>> {
     try {
-      const dto = await this.transport.getJson<AlertsResponseWire>('/realtime/alerts');
+      const dto = await this.transport.getJson<AlertsResponseWire>('/realtime/v1/alerts');
       return success({
         alerts: (dto.alerts ?? []).map(mapAlert),
         freshness: mapFreshness(dto),

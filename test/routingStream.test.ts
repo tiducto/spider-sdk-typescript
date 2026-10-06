@@ -141,7 +141,7 @@ test('a malformed chunk is a terminal decoding failure', () => {
 // Feeds an SSE byte stream through the full planStream: pins the request (REST path, headers and the exact body),
 // that it opens a fresh stream (no cursors), and that framing across read boundaries yields result → done in
 // order (the wire `done` telemetry frame and unknown events are dropped).
-test('planStream POSTs the REST body to /routing/plan-stream and streams result then done events', async () => {
+test('planStream POSTs the REST body to /routing/v1/plan-stream and streams result then done events', async () => {
   const frames = [
     'event: chunk\ndata: {"frontier":600,"found":1,"finalized":1,"results":[{"numberOfTransfers":0,"start":"2026-07-15T08:00:00Z","end":"2026-07-15T08:20:00Z","duration":1200,"legs":[]}]}\n\n',
     'event: progress\ndata: {"frontier":1200}\n\n',
@@ -165,7 +165,7 @@ test('planStream POSTs the REST body to /routing/plan-stream and streams result 
 
   assert.equal(mock.calls.length, 1);
   const call = mock.calls[0];
-  assert.equal(call.url, 'https://brno.api.tiducto.eu/routing/plan-stream');
+  assert.equal(call.url, 'https://brno.api.tiducto.eu/routing/v1/plan-stream');
   assert.equal(call.method, 'POST');
   assert.equal(call.headers.get('apikey'), 'k');
   assert.equal(call.headers.get('accept'), 'text/event-stream');
@@ -199,7 +199,7 @@ test('planStreamNext continues forward from a done endCursor via after', async (
   ));
 
   assert.equal(mock.calls.length, 1);
-  assert.equal(mock.calls[0].url, 'https://brno.api.tiducto.eu/routing/plan-stream');
+  assert.equal(mock.calls[0].url, 'https://brno.api.tiducto.eu/routing/v1/plan-stream');
   const body = JSON.parse(mock.calls[0].body);
   assert.equal(body.after, 'cursor-end');
   assert.equal('before' in body, false);
@@ -353,7 +353,7 @@ test('planStream surfaces a 400 sent before the stream as bad_request naming the
     assert.equal(ev.error.code, 'bad_request');
     assert.equal(ev.error.httpStatus, 400);
     assert.equal(ev.error.field, 'targetResults');
-    assert.equal(ev.error.message, 'POST /routing/plan-stream -> 400: targetResults is out of range');
+    assert.equal(ev.error.message, 'POST /routing/v1/plan-stream -> 400: targetResults is out of range');
   }
 });
 

@@ -45,7 +45,7 @@ function bodyOf(call: Captured): Record<string, unknown> {
   return JSON.parse(call.body) as Record<string, unknown>;
 }
 
-test('plan POSTs the REST body to /routing/plan and maps the route', async () => {
+test('plan POSTs the REST body to /routing/v1/plan and maps the route', async () => {
   const mock = mockFetch({ json: PLAN_RESPONSE });
   const client = new SpiderClient('https://brno.api.tiducto.eu', 'k', { fetch: mock.fetch });
 
@@ -56,7 +56,7 @@ test('plan POSTs the REST body to /routing/plan and maps the route', async () =>
 
   assert.equal(mock.calls.length, 1);
   const call = mock.calls[0];
-  assert.equal(call.url, 'https://brno.api.tiducto.eu/routing/plan');
+  assert.equal(call.url, 'https://brno.api.tiducto.eu/routing/v1/plan');
   assert.equal(call.method, 'POST');
   assert.equal(call.headers.get('apikey'), 'k');
   assert.equal(call.headers.get('content-type'), 'application/json');
@@ -228,7 +228,7 @@ test('a declined plan is a route with no itineraries and the routing errors', as
 const SERVICE_DAY_2026_07_20 = 1_784_498_400;
 const SERVICE_DAY_2026_10_25 = 1_792_882_800;
 
-test('departures POSTs to /routing/departures, maps stoptimes, keeps rows headed for the stop itself, and carries the service date', async () => {
+test('departures POSTs to /routing/v1/departures, maps stoptimes, keeps rows headed for the stop itself, and carries the service date', async () => {
   const mock = mockFetch({
     json: {
       stop: {
@@ -264,7 +264,7 @@ test('departures POSTs to /routing/departures, maps stoptimes, keeps rows headed
   const client = new SpiderClient('https://x', 'k', { fetch: mock.fetch });
   const result = await client.routing.departures('U1', 5, { startTime: 1_784_534_400_000 });
 
-  assert.equal(mock.calls[0].url, 'https://x/routing/departures');
+  assert.equal(mock.calls[0].url, 'https://x/routing/v1/departures');
   assert.equal(mock.calls[0].method, 'POST');
   assert.equal(mock.calls[0].body, '{"id":"U1","numberOfDepartures":5,"startTime":1784534400,"timeRange":86400}');
 
@@ -321,7 +321,7 @@ test('departure serviceDate is the trip\'s service day, across midnight and DST'
   assert.equal(dst.typicalDelaySeconds, null);
 });
 
-test('trip POSTs to /routing/trip and maps stops, geometry and enums', async () => {
+test('trip POSTs to /routing/v1/trip and maps stops, geometry and enums', async () => {
   const mock = mockFetch({
     json: {
       trip: {
@@ -354,7 +354,7 @@ test('trip POSTs to /routing/trip and maps stops, geometry and enums', async () 
   const client = new SpiderClient('https://x', 'k', { fetch: mock.fetch });
   const result = await client.routing.trip('t1', '2026-07-20');
 
-  assert.equal(mock.calls[0].url, 'https://x/routing/trip');
+  assert.equal(mock.calls[0].url, 'https://x/routing/v1/trip');
   assert.equal(mock.calls[0].method, 'POST');
   assert.equal(mock.calls[0].body, '{"id":"t1","serviceDate":"2026-07-20"}');
   if (!result.isSuccess) throw new Error(result.error.code);
@@ -416,7 +416,7 @@ test('trip on a date it does not run has no service date', async () => {
 });
 
 test('an unknown stop or trip id (a 200 with null) is not_found', async () => {
-  const mock = mockFetch((req) => ({ json: req.url.endsWith('/routing/departures') ? { stop: null } : { trip: null } }));
+  const mock = mockFetch((req) => ({ json: req.url.endsWith('/routing/v1/departures') ? { stop: null } : { trip: null } }));
   const client = new SpiderClient('https://x', 'k', { fetch: mock.fetch });
 
   const departures = await client.routing.departures('1:nope');
@@ -455,7 +455,7 @@ test('a 400 is bad_request naming the body field as a dot path', async () => {
     assert.equal(result.error.httpStatus, 400);
     assert.equal(result.error.serverCode, 'bad_request');
     assert.equal(result.error.field, field);
-    assert.equal(result.error.message, `POST /routing/plan -> 400: ${field} is out of range`);
+    assert.equal(result.error.message, `POST /routing/v1/plan -> 400: ${field} is out of range`);
   }
 });
 
@@ -469,7 +469,7 @@ test('a 400 without a body field takes the field its message names', async () =>
   if (!result.isSuccess) {
     assert.equal(result.error.code, 'bad_request');
     assert.equal(result.error.field, 'numberOfDepartures');
-    assert.equal(result.error.message, 'POST /routing/departures -> 400: numberOfDepartures is out of range');
+    assert.equal(result.error.message, 'POST /routing/v1/departures -> 400: numberOfDepartures is out of range');
   }
 });
 

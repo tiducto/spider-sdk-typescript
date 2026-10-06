@@ -54,16 +54,16 @@ test('parseErrorEnvelope takes a code-shaped gateway `error` as the code, but no
 });
 
 test('a query_retired body is query_retired with the body message, or a fixed one that states the state', () => {
-  const retired = toSpiderError(httpFailure('POST /routing/plan', 410, '{"code":"query_retired","message":"persisted queries are retired"}'));
+  const retired = toSpiderError(httpFailure('POST /routing/v1/plan', 410, '{"code":"query_retired","message":"persisted queries are retired"}'));
   assert.equal(retired.code, 'query_retired');
   assert.equal(retired.httpStatus, 410);
   assert.equal(retired.serverCode, 'query_retired');
   assert.equal(retired.message, 'persisted queries are retired');
   // The body code decides even when a proxy rewrites the status, and 410 alone is the fallback.
-  const rewritten = toSpiderError(httpFailure('POST /routing/plan', 400, '{"error":"query_retired"}'));
+  const rewritten = toSpiderError(httpFailure('POST /routing/v1/plan', 400, '{"error":"query_retired"}'));
   assert.equal(rewritten.code, 'query_retired');
   assert.equal(rewritten.message, 'this API part is retired');
-  const bare = toSpiderError(httpFailure('POST /routing/plan', 410, ''));
+  const bare = toSpiderError(httpFailure('POST /routing/v1/plan', 410, ''));
   assert.equal(bare.code, 'query_retired');
   assert.equal(bare.message, 'this API part is retired');
 });
@@ -82,7 +82,7 @@ for (const [code, message] of [
 
   test(`the ${code} body code wins over a rewritten status`, () => {
     for (const status of [400, 401, 404, 410, 429, 500, 502]) {
-      const err = toSpiderError(httpFailure('GET /realtime/alerts', status, JSON.stringify({ error: code, message })));
+      const err = toSpiderError(httpFailure('GET /realtime/v1/alerts', status, JSON.stringify({ error: code, message })));
       assert.equal(err.code, code, `status ${status}`);
       assert.equal(err.httpStatus, status);
       assert.equal(err.message, message);
@@ -94,7 +94,7 @@ test('a plan-limit error takes the body message, and the fixed wording only when
   const custom = toSpiderError(httpFailure('routing plan', 403, '{"error":"planning_limit_reached","message":"trial planning used up"}'));
   assert.equal(custom.code, 'planning_limit_reached');
   assert.equal(custom.message, 'trial planning used up');
-  const inactive = toSpiderError(httpFailure('GET /realtime/alerts', 403, '{"error":"agreement_inactive","message":"agreement expired"}'));
+  const inactive = toSpiderError(httpFailure('GET /realtime/v1/alerts', 403, '{"error":"agreement_inactive","message":"agreement expired"}'));
   assert.equal(inactive.code, 'agreement_inactive');
   assert.equal(inactive.message, 'agreement expired');
   assert.equal(toSpiderError(httpFailure('routing plan', 403, '{"error":"planning_limit_reached"}')).message, 'trip planning limit reached');
@@ -125,26 +125,26 @@ test('a 403 without a plan-limit code stays unauthorized', () => {
 });
 
 test('a 400 naming a field is bad_request with that field, from a JSON envelope or plain text', () => {
-  const stops = toSpiderError(httpFailure('POST /stops/search', 400, '{"error":"bad_request","message":"limit is out of range"}'));
+  const stops = toSpiderError(httpFailure('POST /stops/v1/search', 400, '{"error":"bad_request","message":"limit is out of range"}'));
   assert.equal(stops.code, 'bad_request');
   assert.equal(stops.field, 'limit');
-  const realtime = toSpiderError(httpFailure('GET /realtime/vehicles', 400, 'tripIds is out of range\n'));
+  const realtime = toSpiderError(httpFailure('GET /realtime/v1/vehicles', 400, 'tripIds is out of range\n'));
   assert.equal(realtime.code, 'bad_request');
   assert.equal(realtime.field, 'tripIds');
-  assert.equal(realtime.message, 'GET /realtime/vehicles -> 400: tripIds is out of range');
-  const search = toSpiderError(httpFailure('POST /stops/search', 400, '{"message":"Attribute `name` is not filterable."}'));
+  assert.equal(realtime.message, 'GET /realtime/v1/vehicles -> 400: tripIds is out of range');
+  const search = toSpiderError(httpFailure('POST /stops/v1/search', 400, '{"message":"Attribute `name` is not filterable."}'));
   assert.equal(search.code, 'bad_request');
   assert.equal(search.field, undefined);
-  assert.equal(toSpiderError(httpFailure('POST /stops/search', 400, '{"message":"hitsPerPage is not allowed"}')).field, 'hitsPerPage');
-  assert.equal(toSpiderError(httpFailure('POST /stops/search', 400, '{"message":"limit is invalid"}')).field, 'limit');
+  assert.equal(toSpiderError(httpFailure('POST /stops/v1/search', 400, '{"message":"hitsPerPage is not allowed"}')).field, 'hitsPerPage');
+  assert.equal(toSpiderError(httpFailure('POST /stops/v1/search', 400, '{"message":"limit is invalid"}')).field, 'limit');
   assert.equal(toSpiderError(httpFailure('GET /x', 404, 'limit is out of range')).field, undefined);
 });
 
 test('a 400 field is the body `field`, else the dot path its message names', () => {
-  const named = toSpiderError(httpFailure('POST /routing/plan', 400, '{"code":"bad_request","message":"dateTime is invalid","field":"dateTime"}'));
+  const named = toSpiderError(httpFailure('POST /routing/v1/plan', 400, '{"code":"bad_request","message":"dateTime is invalid","field":"dateTime"}'));
   assert.equal(named.code, 'bad_request');
   assert.equal(named.field, 'dateTime');
-  const bodyWins = toSpiderError(httpFailure('POST /routing/plan', 400, '{"code":"bad_request","message":"something else","field":"via"}'));
+  const bodyWins = toSpiderError(httpFailure('POST /routing/v1/plan', 400, '{"code":"bad_request","message":"something else","field":"via"}'));
   assert.equal(bodyWins.field, 'via');
   for (const [message, field] of [
     ['preferences.transit.transfer.maximumTransfers is out of range', 'preferences.transit.transfer.maximumTransfers'],
@@ -152,8 +152,8 @@ test('a 400 field is the body `field`, else the dot path its message names', () 
     ['targetResults is required', 'targetResults'],
     ['via.visit.coordinate is not allowed', 'via.visit.coordinate'],
   ] as const) {
-    assert.equal(toSpiderError(httpFailure('POST /routing/plan', 400, JSON.stringify({ code: 'bad_request', message }))).field, field, message);
+    assert.equal(toSpiderError(httpFailure('POST /routing/v1/plan', 400, JSON.stringify({ code: 'bad_request', message }))).field, field, message);
   }
-  assert.equal(toSpiderError(httpFailure('POST /routing/plan', 400, '{"message":"the via list is invalid"}')).field, undefined);
-  assert.equal(toSpiderError(httpFailure('POST /routing/plan', 403, '{"message":"x","field":"via"}')).field, undefined);
+  assert.equal(toSpiderError(httpFailure('POST /routing/v1/plan', 400, '{"message":"the via list is invalid"}')).field, undefined);
+  assert.equal(toSpiderError(httpFailure('POST /routing/v1/plan', 403, '{"message":"x","field":"via"}')).field, undefined);
 });

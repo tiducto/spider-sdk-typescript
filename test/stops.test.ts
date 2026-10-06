@@ -12,7 +12,7 @@ test('search builds the query and filter expression and maps hits', async () => 
   const result = await client.stops.search({ name: 'Hlavní', city: 'Brno' });
 
   const call = mock.calls[0];
-  assert.equal(call.url, 'https://brno.api.tiducto.eu/stops/search');
+  assert.equal(call.url, 'https://brno.api.tiducto.eu/stops/v1/search');
   assert.equal(call.method, 'POST');
   const body = JSON.parse(call.body);
   assert.equal(body.q, 'Hlavní');
