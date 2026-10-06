@@ -1,7 +1,7 @@
 /**
  * What went wrong. `bad_request` is an invalid or missing input, caught by the SDK before sending or
- * rejected by the server; `field` names it. `query_retired` means the API no longer serves the persisted
- * query behind the call (HTTP 410 Gone). `planning_limit_reached` means the project has reached the trip
+ * rejected by the server; `field` names it. `query_retired` means the API part this SDK version calls is
+ * retired (HTTP 410 Gone); upgrade the SDK. `planning_limit_reached` means the project has reached the trip
  * planning limit its plan includes; it applies to trip planning only. `agreement_inactive` means the project has
  * no active agreement; it applies to every call made with a client key.
  */
@@ -23,17 +23,18 @@ export interface SpiderError {
   readonly code: SpiderErrorCode;
   readonly message: string;
   readonly httpStatus?: number;
-  /**
-   * The server's machine-readable error code, when it sends one: e.g. `persisted_query_rejected` on an
-   * `unauthorized` when the environment doesn't recognise the query id, or `query_retired`.
-   */
+  /** The server's machine-readable error code, when it sends one: e.g. `bad_request` or `query_retired`. */
   readonly serverCode?: string;
-  /** For a `bad_request`, the input field it names (e.g. `searchWindow`, `maxWindow`, `via`, `limit`). */
+  /**
+   * For a `bad_request`, the request member it names, as a dot path from the body root (e.g. `searchWindow`,
+   * `maxWindow`, `via`, `preferences.transit.transfer.maximumTransfers`, `limit`).
+   */
   readonly field?: string;
   readonly cause?: unknown;
 }
 
 const QUERY_RETIRED = 'query_retired';
+const QUERY_RETIRED_MESSAGE = 'this API part is retired';
 // Plan-limit refusals: the body code names the state, and the fixed wording stands in for a body without a message.
 const LIMIT_MESSAGES = {
   planning_limit_reached: 'trip planning limit reached',
@@ -58,8 +59,6 @@ export class TransportError extends Error {
   readonly field: string | undefined;
   /** The response body's own `message`, when it has one. */
   readonly serverMessage: string | undefined;
-  /** The code-shaped `error` field of the response body, where the gateway puts its own refusal codes. */
-  readonly gatewayCode: string | undefined;
 
   constructor(
     kind: TransportErrorKind,
@@ -67,7 +66,7 @@ export class TransportError extends Error {
     httpStatus?: number,
     serverCode?: string,
     field?: string,
-    body?: { readonly message?: string; readonly gatewayCode?: string },
+    body?: { readonly message?: string },
   ) {
     super(message);
     this.name = 'TransportError';
@@ -76,11 +75,10 @@ export class TransportError extends Error {
     this.serverCode = serverCode;
     this.field = field;
     this.serverMessage = body?.message;
-    this.gatewayCode = body?.gatewayCode;
   }
 }
 
-export function parseErrorEnvelope(text: string): { code?: string; message?: string; gatewayCode?: string } {
+export function parseErrorEnvelope(text: string): { code?: string; message?: string; field?: string } {
   let body: unknown;
   try {
     body = JSON.parse(text);
@@ -89,36 +87,39 @@ export function parseErrorEnvelope(text: string): { code?: string; message?: str
   }
   if (typeof body === 'object' && body !== null) {
     const b = body as Record<string, unknown>;
-    // The gateway's own rejections carry their code in `error` (e.g. "query_retired"); other
+    // The gateway's own rejections carry their code in `error` (e.g. "planning_limit_reached"); other
     // services put a human sentence there, so only a code-shaped value counts.
     const gatewayCode = typeof b.error === 'string' && /^[a-z][a-z0-9_]*$/.test(b.error) ? b.error : undefined;
     return {
       code: typeof b.code === 'string' ? b.code : gatewayCode,
       message: typeof b.message === 'string' ? b.message : undefined,
-      gatewayCode,
+      field: typeof b.field === 'string' ? b.field : undefined,
     };
   }
   return {};
 }
 
-// The fixed wording of the gateway's and services' own 400s, e.g. "limit is out of range".
-const FIELD_PROBLEM = /^([A-Za-z_]\w*) (?:is required|is out of range|is invalid)$/;
+// The fixed wording of the platform's own 400s, e.g. "limit is out of range" or "preferences.street.bicycle is not allowed".
+const FIELD_PROBLEM = /^([A-Za-z_][A-Za-z0-9_.]*) is (?:out of range|required|invalid|not allowed)$/;
 
-/** A non-2xx response → an `http` TransportError carrying the body's error code, and for a 400 the field it names. */
+/**
+ * A non-2xx response → an `http` TransportError carrying the body's error code, and for a 400 the field it names:
+ * the body's `field`, else the one its message names.
+ */
 export function httpFailure(where: string, status: number, text: string, detail?: string): TransportError {
   const env = parseErrorEnvelope(text);
   const message = (detail ?? env.message ?? text.slice(0, 300)).trim();
-  const field = status === 400 ? FIELD_PROBLEM.exec(message)?.[1] : undefined;
+  const field = status === 400 ? env.field ?? FIELD_PROBLEM.exec(message)?.[1] : undefined;
   return new TransportError('http', `${where} -> ${status}: ${message}`, status, env.code, field, env);
 }
 
 /**
- * The plan-limit error an `http` failure's body `error` field names (`planning_limit_reached`,
- * `agreement_inactive`), whatever its status, or `undefined` when it names neither. A `code` field is not read.
+ * The plan-limit error an `http` failure's body code names (`planning_limit_reached`, `agreement_inactive`),
+ * whatever its status, or `undefined` when it names neither. The code is the body's `code`, else its `error`.
  */
 export function limitRefusal(e: TransportError): SpiderError | undefined {
-  if (e.kind !== 'http' || e.gatewayCode == null || !Object.hasOwn(LIMIT_MESSAGES, e.gatewayCode)) return undefined;
-  const code = e.gatewayCode as LimitCode;
+  if (e.kind !== 'http' || e.serverCode == null || !Object.hasOwn(LIMIT_MESSAGES, e.serverCode)) return undefined;
+  const code = e.serverCode as LimitCode;
   return { code, message: e.serverMessage?.trim() || LIMIT_MESSAGES[code], httpStatus: e.httpStatus, serverCode: code };
 }
 
@@ -150,7 +151,7 @@ export function toSpiderError(e: unknown): SpiderError {
       if (refusal != null) return refusal;
       const status = e.httpStatus ?? 0;
       if (e.serverCode === QUERY_RETIRED || status === 410) {
-        return { code: 'query_retired', message: 'persisted query is retired', httpStatus: status, serverCode: e.serverCode };
+        return { code: 'query_retired', message: e.serverMessage?.trim() || QUERY_RETIRED_MESSAGE, httpStatus: status, serverCode: e.serverCode };
       }
       const code: SpiderErrorCode =
         status === 400 ? 'bad_request'
