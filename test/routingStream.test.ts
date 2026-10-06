@@ -16,13 +16,6 @@ const STREAM_OPTIONS: PlanStreamRequestOptions = {
 const PAGE_INFO_FRAME = 'event: pageInfo\ndata: {"startCursor":"s","endCursor":"e","hasNextPage":true,"hasPreviousPage":false,"searchWindowUsed":"PT2H","routingErrors":[]}\n\n';
 const DONE_FRAME = 'event: done\ndata: {"iterations":2,"windowSeconds":7200,"resultCount":1,"stoppedBy":"targetResults"}\n\n';
 
-// Guards the SSE `plan-stream` handling: the record parser that turns `chunk`/`pageInfo` frames into the
-// PlanStreamEvents (`result`/`done`, including realtime-delay mapping onto legs) and ignores every other event,
-// and the end-to-end request (REST path + body) and framing over a streamed response.
-
-// A `chunk` frame → a `result` event carrying itineraries; realtime delays ride on each leg's
-// estimated{time,delay} + realtimeState + realTime + serviceDate and must land on the domain Leg exactly as
-// the batch plan maps them.
 test('chunk maps itineraries with realtime delays', () => {
   const data = JSON.stringify({
     frontier: 1800,
@@ -97,7 +90,6 @@ test('pageInfo maps to the terminal done with continuation cursors', () => {
   assert.deepEqual(event.routingErrors, []);
 });
 
-// A declined plan reports why on its pageInfo, shaped like the batch plan's routingErrors.
 test('pageInfo routingErrors map onto done like the batch plan', () => {
   const data = JSON.stringify({
     startCursor: null,
@@ -126,7 +118,6 @@ test('done frame is dropped', () => {
   assert.equal(parsePlanStreamRecord('done', data), null);
 });
 
-// A new event name is additive: the SDK ignores what it does not know, `error` included.
 test('heartbeats, error and other unknown events are ignored', () => {
   assert.equal(parsePlanStreamRecord('message', ''), null);
   assert.equal(parsePlanStreamRecord('weird', JSON.stringify({ x: 1 })), null);
@@ -138,9 +129,6 @@ test('a malformed chunk is a terminal decoding failure', () => {
   assert.equal(event?.type === 'failure' && event.error.code, 'decoding');
 });
 
-// Feeds an SSE byte stream through the full planStream: pins the request (REST path, headers and the exact body),
-// that it opens a fresh stream (no cursors), and that framing across read boundaries yields result → done in
-// order (the wire `done` telemetry frame and unknown events are dropped).
 test('planStream POSTs the REST body to /routing/v1/plan-stream and streams result then done events', async () => {
   const frames = [
     'event: chunk\ndata: {"frontier":600,"found":1,"finalized":1,"results":[{"numberOfTransfers":0,"start":"2026-07-15T08:00:00Z","end":"2026-07-15T08:20:00Z","duration":1200,"legs":[]}]}\n\n',
@@ -205,7 +193,6 @@ test('planStreamNext continues forward from a done endCursor via after', async (
   assert.equal('before' in body, false);
   assert.equal(body.targetResults, 8);
   assert.equal(body.maxWindow, 'PT120M');
-  // No reliability requested = plan on the timetable: the member is left out, not defaulted.
   assert.equal('reliability' in body, false);
   assert.deepEqual(events.map((e) => e.type), ['done']);
 });
@@ -293,8 +280,6 @@ test('planStream rejects a visit to a coordinate as via is invalid before any re
   assert.equal(mock.calls.length, 0);
 });
 
-// The connection dropped (client gone or a server crash): whatever arrived, a stream without its pageInfo did not
-// complete. A record cut before its blank line (a pageInfo too) and a 2xx body that is not an event stream are such.
 test('a stream that ends before pageInfo is a network failure after the events it sent', async () => {
   const chunk = 'event: chunk\ndata: {"frontier":600,"found":1,"finalized":1,"results":[]}\n\n';
   const cases: [Response, string[]][] = [
@@ -404,7 +389,6 @@ async function collect(stream: AsyncGenerator<PlanStreamEvent>): Promise<PlanStr
   return events;
 }
 
-// A 200 event stream that delivers `frames` and then closes, or fails with `cut` as a dropped connection does.
 function streamResponse(frames: readonly string[], cut?: Error): Response {
   const encoder = new TextEncoder();
   let next = 0;

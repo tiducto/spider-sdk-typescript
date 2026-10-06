@@ -25,10 +25,7 @@ export interface SpiderError {
   readonly httpStatus?: number;
   /** The server's machine-readable error code, when it sends one: e.g. `bad_request` or `query_retired`. */
   readonly serverCode?: string;
-  /**
-   * For a `bad_request`, the request member it names, as a dot path from the body root (e.g. `searchWindow`,
-   * `maxWindow`, `via`, `preferences.transit.transfer.maximumTransfers`, `limit`).
-   */
+  /** For a `bad_request`, the request member it names as a dot path, e.g. `preferences.transit.transfer.maximumTransfers`. */
   readonly field?: string;
   readonly cause?: unknown;
 }
@@ -87,8 +84,7 @@ export function parseErrorEnvelope(text: string): { code?: string; message?: str
   }
   if (typeof body === 'object' && body !== null) {
     const b = body as Record<string, unknown>;
-    // The gateway's own rejections carry their code in `error` (e.g. "planning_limit_reached"); other
-    // services put a human sentence there, so only a code-shaped value counts.
+    // Only a code-shaped `error` counts: the gateway puts its refusal codes there, other services a sentence.
     const gatewayCode = typeof b.error === 'string' && /^[a-z][a-z0-9_]*$/.test(b.error) ? b.error : undefined;
     return {
       code: typeof b.code === 'string' ? b.code : gatewayCode,
@@ -99,13 +95,10 @@ export function parseErrorEnvelope(text: string): { code?: string; message?: str
   return {};
 }
 
-// The fixed wording of the platform's own 400s, e.g. "limit is out of range" or "preferences.street.bicycle is not allowed".
+// The platform's own 400 wording, e.g. "preferences.street.bicycle is not allowed".
 const FIELD_PROBLEM = /^([A-Za-z_][A-Za-z0-9_.]*) is (?:out of range|required|invalid|not allowed)$/;
 
-/**
- * A non-2xx response → an `http` TransportError carrying the body's error code, and for a 400 the field it names:
- * the body's `field`, else the one its message names.
- */
+/** A non-2xx response → an `http` TransportError; a 400's field is the body's `field`, else the one its message names. */
 export function httpFailure(where: string, status: number, text: string, detail?: string): TransportError {
   const env = parseErrorEnvelope(text);
   const message = (detail ?? env.message ?? text.slice(0, 300)).trim();
@@ -113,10 +106,7 @@ export function httpFailure(where: string, status: number, text: string, detail?
   return new TransportError('http', `${where} -> ${status}: ${message}`, status, env.code, field, env);
 }
 
-/**
- * The plan-limit error an `http` failure's body code names (`planning_limit_reached`, `agreement_inactive`),
- * whatever its status, or `undefined` when it names neither. The code is the body's `code`, else its `error`.
- */
+/** The plan-limit error the body code (`code`, else `error`) names, whatever the status; else `undefined`. */
 export function limitRefusal(e: TransportError): SpiderError | undefined {
   if (e.kind !== 'http' || e.serverCode == null || !Object.hasOwn(LIMIT_MESSAGES, e.serverCode)) return undefined;
   const code = e.serverCode as LimitCode;

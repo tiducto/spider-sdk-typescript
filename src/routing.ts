@@ -153,10 +153,7 @@ export type PlanStreamEvent =
       readonly routingErrors: readonly RoutingError[];
     }
   | {
-      /**
-       * Terminal failure — invalid input (`bad_request`), an HTTP or transport problem (a stream that ends before
-       * its `pageInfo` is `network`), or a decoding error.
-       */
+      /** Terminal: invalid input, an HTTP or transport failure (a stream cut before `pageInfo` is `network`), or decoding. */
       readonly type: 'failure';
       readonly error: SpiderError;
     };
@@ -381,8 +378,6 @@ export class SpiderRouting {
     yield* this.openPlanStream(options, { before });
   }
 
-  // Builds the stream request body from the public options plus an optional raw continuation cursor. Forward
-  // paging sets `after`, backward sets `before`; an initial stream sets neither.
   private streamBody(options: PlanStreamRequestOptions, cursor?: PageCursor): PlanStreamRequest {
     const time: RouteTimeSpec = options.arriveBy != null
       ? { kind: 'arriveBy', epochMs: toEpochMs(options.arriveBy) }
@@ -406,10 +401,7 @@ export class SpiderRouting {
     };
   }
 
-  // Opens the SSE `plan-stream` request and turns its `chunk`/`pageInfo` records into a PlanStreamEvent stream;
-  // other events are ignored. Invalid options, a non-2xx response, a transport error, a decoding slip, or a
-  // stream that ends before its `pageInfo` becomes a terminal `failure` event rather than a throw. Reading stops
-  // when the server closes the stream or the consumer stops iterating (which cancels the reader → aborts the request).
+  // Never throws: every failure, a stream cut before its `pageInfo` included, is one terminal `failure` event.
   private async *openPlanStream(options: PlanStreamRequestOptions, cursor?: PageCursor): AsyncGenerator<PlanStreamEvent> {
     const invalid = invalidStreamOptions(options);
     if (invalid != null) {
@@ -441,7 +433,7 @@ export class SpiderRouting {
         const { value, done } = await reader.read();
         if (done) break;
         buffer = (buffer + decoder.decode(value, { stream: true })).replace(/\r\n/g, '\n');
-        // SSE records end with a blank line; parse every complete one. An unterminated remainder at close is discarded.
+        // A record still unterminated at close is discarded, per the SSE rules.
         let boundary: number;
         while ((boundary = buffer.indexOf('\n\n')) !== -1) {
           const record = parseSseFrame(buffer.slice(0, boundary));
@@ -566,7 +558,6 @@ function toEpochMs(value: number | Date): number {
   return typeof value === 'number' ? value : value.getTime();
 }
 
-// One continuation cursor: `after` for the next page, `before` for the previous one, never both.
 type PageCursor = { readonly after: string } | { readonly before: string };
 
 function cursorOf(kind: 'after' | 'before', cursor: string | null): PageCursor | undefined {

@@ -63,7 +63,6 @@ test('plan POSTs the REST body to /routing/v1/plan and maps the route', async ()
   assert.equal(call.headers.get('x-spider-contract-version'), CONTRACT_VERSION);
   assert.equal(call.headers.get('x-spider-sdk'), SDK_IDENTITY);
 
-  // No reliability, page size or cursor requested: the members are left out, not defaulted.
   const body = bodyOf(call);
   assert.deepEqual(Object.keys(body), ['dateTime', 'origin', 'destination', 'searchWindow']);
   assert.deepEqual(body.origin, { location: { coordinate: { latitude: 49.19, longitude: 16.61 } } });
@@ -301,9 +300,7 @@ test('departure serviceDate is the trip\'s service day, across midnight and DST'
         name: 'Station',
         wheelchairBoarding: null,
         stoptimesWithoutPatterns: [
-          // 00:40 on 21 July, still on the 20 July service day.
           { serviceDay: SERVICE_DAY_2026_07_20, scheduledDeparture: 24 * 3600 + 40 * 60, typicalDelay: 20, trip: { gtfsId: 'night' } },
-          // 25 October is a 25-hour day; its anchor is 23:00Z the day before.
           { serviceDay: SERVICE_DAY_2026_10_25, scheduledDeparture: 8 * 3600, trip: { gtfsId: 'dst' } },
         ],
       },
@@ -653,8 +650,6 @@ test('plan omits modes/preferences with no filters and defaults the 1h search wi
   assert.equal(body.searchWindow, 'PT60M');
 });
 
-// Paging pairs one cursor with the original body: next = body + after, previous = body + before. A page reached
-// by paging never carries its own cursor into the next request.
 test('planNext pages forward with after and planPrevious backward with before, each alone', async () => {
   const mock = mockFetch({ json: PLAN_RESPONSE });
   const client = new SpiderClient('https://x', 'k', { fetch: mock.fetch });

@@ -69,13 +69,7 @@ export class Transport {
     return parseJson<D>(text, `POST ${path}`);
   }
 
-  /**
-   * Opens a Server-Sent Events stream: POSTs `body` to `path` and returns the raw streaming {@link Response} for
-   * the caller to read frame-by-frame. Unlike {@link send}, it does not auto-retry — a streamed response is
-   * consumed over time, so retrying (or aborting once the body is flowing) makes no sense; the connect timeout
-   * guards only the initial handshake and is cleared the moment the response headers arrive, leaving the body to
-   * stream uninterrupted.
-   */
+  /** POSTs `body` to `path` for an SSE stream, never auto-retried; the connect timeout covers only the handshake. */
   async stream(path: string, body: unknown): Promise<Response> {
     const headers = this.contractHeaders({ 'content-type': 'application/json', accept: 'text/event-stream' });
     headers.set('apikey', this.apiKey);
