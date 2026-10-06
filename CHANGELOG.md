@@ -1,20 +1,22 @@
 # Changelog
 
-## 2.0.0 — 2026-10-06
+## 1.2.0 — 2026-10-06
 
-Targets Spider API contract 2.0. Routing moves from persisted GraphQL queries to plain REST operations; the
-public API stays as it was apart from the changes below. From the platform's move to contract 2.0, routing
-calls from 1.x SDKs fail as `query_retired`, so routing needs this release. Stops and realtime calls are
-unaffected.
+Targets Spider API contract 1.2. Routing moves from persisted GraphQL queries to plain REST operations, and every
+routing, stops and realtime path moves under `/v1`; the public API stays as it was apart from the changes below.
+SDKs up to 1.1 do not work against contract 1.2, so every surface needs this release.
 
 ### Changed
 
-- **Routing calls are REST.** `plan`, `planNext` and `planPrevious` POST a JSON body to `/routing/plan`,
-  `departures` to `/routing/departures` and `trip` to `/routing/trip`; `planStream`, `planStreamNext` and
-  `planStreamPrevious` POST to `/routing/plan-stream` and read its event stream. The SDK sends no persisted-query
-  ids.
-- **`'query_retired'` means the API part this SDK version calls is retired** (HTTP 410): upgrade the SDK. The
-  error's message is the server's, or `this API part is retired` when it sends none.
+- **Routing calls are REST.** `plan`, `planNext` and `planPrevious` POST a JSON body to `/routing/v1/plan`,
+  `departures` to `/routing/v1/departures` and `trip` to `/routing/v1/trip`; `planStream`, `planStreamNext` and
+  `planStreamPrevious` POST to `/routing/v1/plan-stream` and read its event stream. The SDK sends no
+  persisted-query ids.
+- **Stops and realtime calls use the `/v1` paths:** `/stops/v1/search`, `/realtime/v1/vehicles`,
+  `/realtime/v1/vehicles/by-trip/{id}`, `/realtime/v1/delays` and `/realtime/v1/alerts`. Requests and responses
+  are unchanged.
+- **`'query_retired'` (HTTP 410) carries the server's message**, or `this API part is retired` when it sends
+  none.
 - **A visit to a coordinate is rejected before any request**, as `bad_request` on `via` (`via is invalid`), the
   answer the server already gave. `ViaLocation.visit` takes a stop.
 - **A visit waits at most 3600 seconds** (was 86400). A longer or negative wait is rejected before any request,
@@ -26,15 +28,12 @@ unaffected.
   (the connection dropped). Events this SDK does not know are ignored, `error` included; a malformed event ends
   the stream with a `decoding` failure.
 - **A plan-limit refusal's code is the response body's `code`, else its `error`.**
+- `serverCode` `persisted_query_rejected` is no longer sent: the SDK sends no persisted queries.
 
 ### Deprecated
 
 - `RouteEdge.cursor`: always `'NoCursor'`; page with `Route.pageInfo`.
 - `Itinerary.accessibilityScore` and `Leg.accessibilityScore`: always `null`.
-
-### Removed
-
-- `persisted_query_rejected`: the SDK sends no persisted queries, so no call is refused for one.
 
 ## 1.1.0 — 2026-10-05
 
