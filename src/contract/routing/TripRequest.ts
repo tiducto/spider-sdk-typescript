@@ -1,4 +1,4 @@
-/** POST body for `/routing/trip`. A key not listed here is a 400 `<key> is not allowed`. */
+/** POST body for `/routing/v1/trip`. A key not listed here is a 400 `<key> is not allowed`. */
 export interface TripRequest {
   /** Feed-prefixed trip id (`<feedId>:<id>`). */
   id: string;

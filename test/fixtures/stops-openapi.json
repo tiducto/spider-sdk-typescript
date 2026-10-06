@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Tiducto Transit API — Stops",
-    "version": "2.0",
+    "version": "1.2",
     "description": "Stop text/geo search — a plain-REST customer surface (key-auth). Companion to routing and realtime; the three share one pack version. `locationType` and `wheelchairBoarding` are GTFS integer codes, not enums, so an unrecognized code passes through unchanged."
   },
   "servers": [
@@ -22,7 +22,7 @@
     }
   ],
   "paths": {
-    "/stops/search": {
+    "/stops/v1/search": {
       "post": {
         "summary": "Search Stops",
         "description": "Stop text/geo search.",
@@ -123,7 +123,7 @@
     "schemas": {
       "StopSearchRequest": {
         "type": "object",
-        "description": "POST body for `/stops/search`. The body accepts only `q`, `filter`, `sort` and `limit`; any other key is an HTTP 400 naming that key. `filter` and `sort` are search-index expressions the client composes (not modeled shapes). Filterable `StopHit` fields: `gtfsId`, the admin levels (`country`, `region`, `district`, `city`, `suburb`), `locationType`, `wheelchairBoarding` and `modes`; `_geo` (the stop's position) is filterable and sortable. The other `StopHit` fields (`name`, `code`, `lat`, `lon`) aren't filterable, and a filter on one of them fails with a `StopSearchError`. Filtering on an admin level the environment wasn't enriched with matches no stops rather than failing.",
+        "description": "POST body for `/stops/v1/search`. The body accepts only `q`, `filter`, `sort` and `limit`; any other key is an HTTP 400 naming that key. `filter` and `sort` are search-index expressions the client composes (not modeled shapes). Filterable `StopHit` fields: `gtfsId`, the admin levels (`country`, `region`, `district`, `city`, `suburb`), `locationType`, `wheelchairBoarding` and `modes`; `_geo` (the stop's position) is filterable and sortable. The other `StopHit` fields (`name`, `code`, `lat`, `lon`) aren't filterable, and a filter on one of them fails with a `StopSearchError`. Filtering on an admin level the environment wasn't enriched with matches no stops rather than failing.",
         "properties": {
           "q": {
             "type": "string",
