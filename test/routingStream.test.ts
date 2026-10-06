@@ -294,13 +294,16 @@ test('planStream rejects a visit to a coordinate as via is invalid before any re
 });
 
 // The connection dropped (client gone or a server crash): whatever arrived, a stream without its pageInfo did not
-// complete, and a 2xx body that is not an event stream is one of those.
+// complete. A record cut before its blank line (a pageInfo too) and a 2xx body that is not an event stream are such.
 test('a stream that ends before pageInfo is a network failure after the events it sent', async () => {
   const chunk = 'event: chunk\ndata: {"frontier":600,"found":1,"finalized":1,"results":[]}\n\n';
   const cases: [Response, string[]][] = [
     [streamResponse([chunk]), ['result', 'failure']],
     [streamResponse([]), ['failure']],
     [streamResponse([chunk], new TypeError('terminated')), ['result', 'failure']],
+    [streamResponse(['event: chunk\ndata: {"frontier":600,"found":1,"fin']), ['failure']],
+    [streamResponse([chunk, 'event: pageInfo\ndata: {"startCursor":"s","endCu']), ['result', 'failure']],
+    [streamResponse([chunk, PAGE_INFO_FRAME.trimEnd()]), ['result', 'failure']],
     [new Response(JSON.stringify({ itineraries: [] }), { status: 200, headers: { 'content-type': 'application/json' } }), ['failure']],
   ];
   for (const [response, types] of cases) {

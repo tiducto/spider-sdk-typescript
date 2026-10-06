@@ -437,12 +437,11 @@ export class SpiderRouting {
     let buffer = '';
     let sawPageInfo = false;
     try {
-      for (let closed = false; !closed;) {
+      for (;;) {
         const { value, done } = await reader.read();
-        closed = done;
-        // Closing terminates a trailing record the server didn't end with a blank line.
-        buffer = closed ? `${buffer}\n\n` : (buffer + decoder.decode(value, { stream: true })).replace(/\r\n/g, '\n');
-        // SSE records are separated by a blank line; parse every complete one and keep the remainder buffered.
+        if (done) break;
+        buffer = (buffer + decoder.decode(value, { stream: true })).replace(/\r\n/g, '\n');
+        // SSE records end with a blank line; parse every complete one. An unterminated remainder at close is discarded.
         let boundary: number;
         while ((boundary = buffer.indexOf('\n\n')) !== -1) {
           const record = parseSseFrame(buffer.slice(0, boundary));
