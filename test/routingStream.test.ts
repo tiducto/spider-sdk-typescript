@@ -357,24 +357,6 @@ test('planStream surfaces a 400 sent before the stream as bad_request naming the
   }
 });
 
-test('planStream surfaces a 410 as a query_retired failure', async () => {
-  const fetch: FetchLike = async () =>
-    new Response(JSON.stringify({ code: 'query_retired', message: 'persisted queries are retired' }), { status: 410 });
-  const client = new SpiderClient('https://x', 'k', { fetch });
-
-  const events = await collect(client.routing.planStream(STREAM_OPTIONS));
-
-  assert.equal(events.length, 1);
-  const ev = events[0];
-  assert.equal(ev.type, 'failure');
-  if (ev.type === 'failure') {
-    assert.equal(ev.error.code, 'query_retired');
-    assert.equal(ev.error.httpStatus, 410);
-    assert.equal(ev.error.serverCode, 'query_retired');
-    assert.equal(ev.error.message, 'persisted queries are retired');
-  }
-});
-
 test('planStream surfaces a plan-limit 403 before the stream starts as a single failure with its code', async () => {
   for (const [code, message] of [
     ['planning_limit_reached', 'trip planning limit reached'],

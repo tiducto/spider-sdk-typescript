@@ -53,12 +53,12 @@ test('parseErrorEnvelope takes a code-shaped gateway `error` as the code, but no
   );
 });
 
-test('a query_retired body is query_retired with the body message, or a fixed one that states the state', () => {
-  const retired = toSpiderError(httpFailure('POST /routing/v1/plan', 410, '{"code":"query_retired","message":"persisted queries are retired"}'));
+test('a 410 or a query_retired body is query_retired with the body message, else a fixed one', () => {
+  const retired = toSpiderError(httpFailure('POST /routing/v1/plan', 410, '{"code":"query_retired","message":"this API version is retired"}'));
   assert.equal(retired.code, 'query_retired');
   assert.equal(retired.httpStatus, 410);
   assert.equal(retired.serverCode, 'query_retired');
-  assert.equal(retired.message, 'persisted queries are retired');
+  assert.equal(retired.message, 'this API version is retired');
   // The body code decides even when a proxy rewrites the status, and 410 alone is the fallback.
   const rewritten = toSpiderError(httpFailure('POST /routing/v1/plan', 400, '{"error":"query_retired"}'));
   assert.equal(rewritten.code, 'query_retired');

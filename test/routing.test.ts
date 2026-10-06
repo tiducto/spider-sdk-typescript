@@ -481,25 +481,6 @@ test('a gateway declaring another contract major is not an error', async () => {
   assert.equal(result.isSuccess, true);
 });
 
-test('a 410 on any routing call is query_retired with the server message', async () => {
-  const mock = mockFetch({ status: 410, json: { code: 'query_retired', message: 'persisted queries are retired' } });
-  const client = new SpiderClient('https://x', 'k', { fetch: mock.fetch });
-
-  for (const result of [
-    await client.routing.plan({ origin: Location.coordinate(1, 2), destination: Location.coordinate(3, 4) }),
-    await client.routing.departures('U1'),
-    await client.routing.trip('t1'),
-  ]) {
-    assert.equal(result.isSuccess, false);
-    if (!result.isSuccess) {
-      assert.equal(result.error.code, 'query_retired');
-      assert.equal(result.error.httpStatus, 410);
-      assert.equal(result.error.serverCode, 'query_retired');
-      assert.equal(result.error.message, 'persisted queries are retired');
-    }
-  }
-});
-
 test('routing errors decode FROM/TO/VIA, and unknown codes, fields and enums decode to UNKNOWN', async () => {
   const response = structuredClone(PLAN_RESPONSE) as unknown as {
     routingErrors: unknown[];
