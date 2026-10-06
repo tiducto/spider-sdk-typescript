@@ -1,6 +1,6 @@
 # @tiducto/spider-sdk-typescript
 
-The TypeScript SDK for **Spider** — the managed transit API by Tiducto. Trip planning, stop search, and live realtime data behind one typed client that ships the exact queries the gateway allows and attaches auth for you.
+The TypeScript SDK for **Spider** — the managed transit API by Tiducto. Trip planning, stop search, and live realtime data behind one typed client that speaks the published API contract and attaches auth for you.
 
 Native TypeScript, zero runtime dependencies (uses the platform `fetch`). Sibling of the Kotlin, Swift, and Dart SDKs — same domain model, TypeScript idioms.
 
