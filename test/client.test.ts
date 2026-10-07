@@ -64,9 +64,9 @@ test('a plan-limit refusal reaches every surface as its own code', async () => {
       departures: () => client.routing.departures('1:S'),
       trip: () => client.routing.trip('1:T'),
       stopSearch: () => client.stops.search({ name: 'x' }),
-      vehicles: () => client.realtime.vehicles(['t1']),
-      vehicleForTrip: () => client.realtime.vehicleForTrip('t1'),
-      delays: () => client.realtime.delays(['t1'], '2026-09-30'),
+      vehicles: () => client.realtime.vehicles(['1:T']),
+      vehicleForTrip: () => client.realtime.vehicleForTrip('1:T'),
+      delays: () => client.realtime.delays('2026-09-30', ['1:T']),
       alerts: () => client.realtime.alerts(),
     };
     for (const [surface, call] of Object.entries(calls)) {

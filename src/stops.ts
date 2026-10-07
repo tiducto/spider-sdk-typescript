@@ -13,8 +13,8 @@ export interface Stop {
   /** GTFS `location_type`: 0 a stop or platform, 1 a station (its platforms folded into it); null means a stop. */
   readonly locationType: number | null;
   readonly wheelchairBoarding: WheelchairBoarding | null;
-  readonly lat: number | null;
-  readonly lon: number | null;
+  readonly lat: number;
+  readonly lon: number;
   readonly country: string | null;
   readonly region: string | null;
   readonly district: string | null;
@@ -150,7 +150,7 @@ function escapeFilter(value: string): string {
 
 function extractStopError(raw: string): string {
   try {
-    const parsed = JSON.parse(raw) as StopSearchErrorWire;
+    const parsed = JSON.parse(raw) as ErrorResponseWire;
     if (typeof parsed.message === 'string') return parsed.message;
   } catch {
     return raw.slice(0, 300);
@@ -165,8 +165,8 @@ function toStop(hit: StopHitWire): Stop {
     code: hit.code ?? null,
     locationType: hit.locationType ?? null,
     wheelchairBoarding: wheelchairFromGtfs(hit.wheelchairBoarding),
-    lat: hit.lat ?? null,
-    lon: hit.lon ?? null,
+    lat: hit.lat,
+    lon: hit.lon,
     country: hit.country ?? null,
     region: hit.region ?? null,
     district: hit.district ?? null,
@@ -185,28 +185,28 @@ interface StopSearchRequestWire {
 
 interface StopSearchResponseWire {
   hits: StopHitWire[];
-  query?: string;
+  query: string;
 }
 
-interface StopSearchErrorWire {
+interface ErrorResponseWire {
+  code: string;
   message: string;
-  code?: string;
-  type?: string;
-  link?: string;
+  field?: string;
 }
 
 interface StopHitWire {
   gtfsId: string;
   name: string;
-  code?: string | null;
-  locationType?: number | null;
-  wheelchairBoarding?: number | null;
-  modes?: string[] | null;
-  lat?: number | null;
-  lon?: number | null;
-  country?: string | null;
-  region?: string | null;
-  district?: string | null;
-  city?: string | null;
-  suburb?: string | null;
+  code?: string;
+  locationType?: number;
+  wheelchairBoarding?: number;
+  modes?: string[];
+  lat: number;
+  lon: number;
+  country?: string;
+  region?: string;
+  district?: string;
+  city?: string;
+  suburb?: string;
+  _geoDistance?: number;
 }

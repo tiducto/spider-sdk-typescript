@@ -1,28 +1,28 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { SpiderClient, delayFor } from '../src/index.ts';
+import { SpiderClient } from '../src/index.ts';
 import { mockFetch } from './support.ts';
 
 test('vehicles maps positions, missing and freshness', async () => {
   const mock = mockFetch({
     json: {
-      vehicles: [{ tripId: 't1', latitude: 49.1, longitude: 16.6, occupancyStatus: 'FULL', timestamp: 1000 }],
-      missing: ['t2'],
+      vehicles: [{ tripId: '1:39822', latitude: 49.1, longitude: 16.6, occupancyStatus: 'FULL', timestamp: 1000 }],
+      missing: ['1:39823'],
       feedTimestamp: 2000,
       staleSeconds: 5,
     },
   });
   const client = new SpiderClient('https://x', 'k', { fetch: mock.fetch });
-  const result = await client.realtime.vehicles(['t1', 't2']);
+  const result = await client.realtime.vehicles(['1:39822', '1:39823']);
 
-  assert.equal(mock.calls[0].url, 'https://x/realtime/v1/vehicles?tripIds=t1%2Ct2');
+  assert.equal(mock.calls[0].url, 'https://x/realtime/v1/vehicles?tripIds=1%3A39822%2C1%3A39823');
   assert.equal(mock.calls[0].headers.get('apikey'), 'k');
   if (!result.isSuccess) throw new Error(result.error.code);
   assert.equal(result.data.vehicles.length, 1);
-  assert.equal(result.data.vehicles[0].tripId, 't1');
+  assert.equal(result.data.vehicles[0].tripId, '1:39822');
   assert.equal(result.data.vehicles[0].occupancy, 'FULL');
   assert.equal(result.data.vehicles[0].timestampEpochMs, 1_000_000);
-  assert.deepEqual([...result.data.missing], ['t2']);
+  assert.deepEqual([...result.data.missing], ['1:39823']);
   assert.equal(result.data.freshness.feedTimestampEpochMs, 2_000_000);
   assert.equal(result.data.freshness.staleSeconds, 5);
 });
@@ -39,8 +39,8 @@ test('vehicles with no trip ids skips the request', async () => {
 test('vehicleForTrip treats 404 as no vehicle reporting', async () => {
   const mock = mockFetch({ status: 404, text: 'not found' });
   const client = new SpiderClient('https://x', 'k', { fetch: mock.fetch });
-  const result = await client.realtime.vehicleForTrip('t1');
-  assert.equal(mock.calls[0].url, 'https://x/realtime/v1/vehicles/by-trip/t1');
+  const result = await client.realtime.vehicleForTrip('1:39822');
+  assert.equal(mock.calls[0].url, 'https://x/realtime/v1/vehicles/by-trip/1%3A39822');
   if (!result.isSuccess) throw new Error(result.error.code);
   assert.equal(result.data.vehicle, null);
 });
@@ -52,7 +52,7 @@ test('vehicleForTrip fails a 404 whose body names a plan limit, and a plain 404 
   ] as const) {
     const mock = mockFetch({ status: 404, json: { error: code, message } });
     const client = new SpiderClient('https://x', 'k', { fetch: mock.fetch });
-    const result = await client.realtime.vehicleForTrip('t1');
+    const result = await client.realtime.vehicleForTrip('1:39822');
     assert.equal(result.isSuccess, false, code);
     if (!result.isSuccess) {
       assert.equal(result.error.code, code);
@@ -63,78 +63,92 @@ test('vehicleForTrip fails a 404 whose body names a plan limit, and a plain 404 
   }
   for (const reply of [{ status: 404, text: '' }, { status: 404, json: { error: 'not_found', message: 'no vehicle' } }]) {
     const client = new SpiderClient('https://x', 'k', { fetch: mockFetch(reply).fetch });
-    const result = await client.realtime.vehicleForTrip('t1');
+    const result = await client.realtime.vehicleForTrip('1:39822');
     if (!result.isSuccess) throw new Error(result.error.code);
     assert.equal(result.data.vehicle, null);
   }
 });
 
-test('delays posts grouped queries and maps per-service-date results', async () => {
+test('delays gets one service date with deduplicated, sorted, untouched ids and maps the flat response', async () => {
   const mock = mockFetch({
     json: {
-      results: [
-        { serviceDate: '2026-07-19', delays: [{ tripId: 't1', delaySeconds: 120, stopTimeUpdates: [] }], missing: ['t2'] },
-      ],
-      feedTimestamp: null,
-      staleSeconds: null,
+      serviceDate: '2026-07-19',
+      delays: [{ tripId: '1:39822', routeId: '1:L41', delaySeconds: 120, stopTimeUpdates: [{ stopId: '1:U1155Z1', arrivalDelay: 120 }] }],
+      missing: ['1:39823'],
+      feedTimestamp: 2000,
+      staleSeconds: 4,
     },
   });
   const client = new SpiderClient('https://x', 'k', { fetch: mock.fetch });
-  const result = await client.realtime.delays(['t1', 't2'], '2026-07-19');
+  const result = await client.realtime.delays('2026-07-19', ['1:39823', '1:39822', '1:39823']);
 
   const call = mock.calls[0];
-  assert.equal(call.url, 'https://x/realtime/v1/delays');
-  assert.equal(call.method, 'POST');
-  assert.deepEqual(JSON.parse(call.body), { queries: [{ serviceDate: '2026-07-19', tripIds: ['t1', 't2'] }] });
+  assert.equal(call.method, 'GET');
+  const url = new URL(call.url);
+  assert.equal(url.pathname, '/realtime/v1/delays');
+  assert.equal(url.searchParams.get('serviceDate'), '2026-07-19');
+  assert.equal(url.searchParams.get('tripIds'), '1:39822,1:39823');
 
   if (!result.isSuccess) throw new Error(result.error.code);
-  assert.equal(result.data.groups.length, 1);
-  const group = result.data.groups[0];
-  assert.equal(group.serviceDate, '2026-07-19');
-  assert.equal(group.delays[0].delaySeconds, 120);
-  assert.deepEqual([...group.missing], ['t2']);
-  const hit = delayFor(result.data, 't1', '2026-07-19');
-  assert.equal(hit?.delaySeconds, 120);
-  assert.equal(delayFor(result.data, 't2', '2026-07-19'), null);
+  assert.equal(result.data.serviceDate, '2026-07-19');
+  assert.equal(result.data.delays.length, 1);
+  assert.equal(result.data.delays[0].tripId, '1:39822');
+  assert.equal(result.data.delays[0].delaySeconds, 120);
+  assert.equal(result.data.delays[0].stopTimeUpdates[0].stopId, '1:U1155Z1');
+  assert.equal(result.data.delays[0].scheduleRelationship, null);
+  assert.deepEqual([...result.data.missing], ['1:39823']);
+  assert.equal(result.data.freshness.feedTimestampEpochMs, 2_000_000);
+  assert.equal(result.data.freshness.staleSeconds, 4);
+});
+
+test('delays sorts ids by code unit, so equal requests share one URL', async () => {
+  const mock = mockFetch({ json: { serviceDate: '2026-07-19', delays: [], missing: [] } });
+  const client = new SpiderClient('https://x', 'k', { fetch: mock.fetch });
+  await client.realtime.delays('2026-07-19', ['1:b', '1:B', '1:a', '10:a', '1:ä']);
+  await client.realtime.delays('2026-07-19', ['1:ä', '10:a', '1:a', '1:B', '1:b', '1:a']);
+  assert.equal(new URL(mock.calls[0].url).searchParams.get('tripIds'), '10:a,1:B,1:a,1:b,1:ä');
+  assert.equal(mock.calls[0].url, mock.calls[1].url);
+});
+
+test('delays leaves freshness null when the feed has not reported', async () => {
+  const mock = mockFetch({ json: { serviceDate: '2026-07-19', delays: [], missing: ['1:39822'] } });
+  const client = new SpiderClient('https://x', 'k', { fetch: mock.fetch });
+  const result = await client.realtime.delays('2026-07-19', ['1:39822']);
+  if (!result.isSuccess) throw new Error(result.error.code);
   assert.equal(result.data.freshness.feedTimestampEpochMs, null);
+  assert.equal(result.data.freshness.staleSeconds, null);
 });
 
-test('delays groups multiple service dates in one request', async () => {
-  const mock = mockFetch({ json: { results: [] } });
-  const client = new SpiderClient('https://x', 'k', { fetch: mock.fetch });
-  await client.realtime.delays({ '2026-07-19': ['t1'], '2026-07-20': ['t2', 't3'] });
-  assert.deepEqual(JSON.parse(mock.calls[0].body), {
-    queries: [
-      { serviceDate: '2026-07-19', tripIds: ['t1'] },
-      { serviceDate: '2026-07-20', tripIds: ['t2', 't3'] },
-    ],
-  });
-});
-
-test('delays with no trip ids skips the request', async () => {
+test('delays rejects bad input as bad_request without a request', async () => {
   const mock = mockFetch({ json: {} });
   const client = new SpiderClient('https://x', 'k', { fetch: mock.fetch });
-  const result = await client.realtime.delays([], '2026-07-19');
+  const ids = (n: number) => Array.from({ length: n }, (_, i) => `1:${i}`);
+  const cases = [
+    [await client.realtime.delays('20260719', ['1:39822']), 'serviceDate', 'serviceDate is invalid'],
+    [await client.realtime.delays('2026-02-30', ['1:39822']), 'serviceDate', 'serviceDate is invalid'],
+    [await client.realtime.delays('2026-07-19', []), 'tripIds', 'tripIds is required'],
+    [await client.realtime.delays('2026-07-19', ['1:39822', '']), 'tripIds', 'tripIds is invalid'],
+    [await client.realtime.delays('2026-07-19', ['1:39822', ' ']), 'tripIds', 'tripIds is invalid'],
+    [await client.realtime.delays('2026-07-19', ids(51)), 'tripIds', 'tripIds is out of range'],
+  ] as const;
   assert.equal(mock.calls.length, 0);
-  if (!result.isSuccess) throw new Error(result.error.code);
-  assert.equal(result.data.groups.length, 0);
-});
-
-test('delays rejects a malformed service date as bad_request without a request', async () => {
-  const mock = mockFetch({ json: {} });
-  const client = new SpiderClient('https://x', 'k', { fetch: mock.fetch });
-
-  const single = await client.realtime.delays(['t1'], '20260719');
-  const grouped = await client.realtime.delays({ '2026-07-19': ['t1'], '2026-02-30': ['t2'] });
-
-  assert.equal(mock.calls.length, 0);
-  for (const result of [single, grouped]) {
-    assert.equal(result.isSuccess, false);
+  for (const [result, field, message] of cases) {
+    assert.equal(result.isSuccess, false, message);
     if (!result.isSuccess) {
       assert.equal(result.error.code, 'bad_request');
-      assert.equal(result.error.field, 'serviceDate');
+      assert.equal(result.error.field, field);
+      assert.equal(result.error.message, message);
     }
   }
+});
+
+test('delays counts distinct ids against the limit of 50', async () => {
+  const mock = mockFetch({ json: { serviceDate: '2026-07-19', delays: [], missing: [] } });
+  const client = new SpiderClient('https://x', 'k', { fetch: mock.fetch });
+  const ids = Array.from({ length: 50 }, (_, i) => `1:${i}`);
+  const result = await client.realtime.delays('2026-07-19', [...ids, ...ids]);
+  assert.equal(result.isSuccess, true);
+  assert.equal(new URL(mock.calls[0].url).searchParams.get('tripIds')?.split(',').length, 50);
 });
 
 test('alerts maps text and active periods', async () => {
@@ -153,35 +167,28 @@ test('alerts maps text and active periods', async () => {
   assert.equal(result.data.alerts[0].activePeriods[0].startEpochMs, 1000);
 });
 
-test('vehicles and delays reject more than 50 trip ids, counted across dates, without a request', async () => {
-  const mock = mockFetch({ json: { vehicles: [], results: [] } });
+test('vehicles rejects more than 50 trip ids without a request', async () => {
+  const mock = mockFetch({ json: { vehicles: [], missing: [] } });
   const client = new SpiderClient('https://x', 'k', { fetch: mock.fetch });
-  const ids = (n: number, p = 't') => Array.from({ length: n }, (_, i) => `${p}${i}`);
+  const ids = (n: number) => Array.from({ length: n }, (_, i) => `1:${i}`);
 
-  const results = [
-    await client.realtime.vehicles(ids(51)),
-    await client.realtime.delays(ids(51), '2026-07-19'),
-    await client.realtime.delays({ '2026-07-19': ids(30, 'a'), '2026-07-20': ids(21, 'b') }),
-  ];
-  for (const result of results) {
-    assert.equal(result.isSuccess, false);
-    if (!result.isSuccess) {
-      assert.equal(result.error.code, 'bad_request');
-      assert.equal(result.error.field, 'tripIds');
-      assert.equal(result.error.message, 'tripIds is out of range');
-    }
+  const result = await client.realtime.vehicles(ids(51));
+  assert.equal(result.isSuccess, false);
+  if (!result.isSuccess) {
+    assert.equal(result.error.code, 'bad_request');
+    assert.equal(result.error.field, 'tripIds');
+    assert.equal(result.error.message, 'tripIds is out of range');
   }
   assert.equal(mock.calls.length, 0);
 
   await client.realtime.vehicles(ids(50));
-  await client.realtime.delays({ '2026-07-19': ids(30, 'a'), '2026-07-20': ids(20, 'b') });
-  assert.equal(mock.calls.length, 2);
+  assert.equal(mock.calls.length, 1);
 });
 
 test('a realtime 400 naming a field is bad_request on that field', async () => {
   const mock = mockFetch({ status: 400, text: 'tripIds is out of range' });
   const client = new SpiderClient('https://x', 'k', { fetch: mock.fetch });
-  const result = await client.realtime.vehicles(['t1']);
+  const result = await client.realtime.vehicles(['1:39822']);
   assert.equal(result.isSuccess, false);
   if (!result.isSuccess) {
     assert.equal(result.error.code, 'bad_request');

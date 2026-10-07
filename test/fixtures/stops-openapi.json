@@ -2,8 +2,8 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Tiducto Transit API — Stops",
-    "version": "1.2",
-    "description": "Stop text/geo search — a plain-REST customer surface (key-auth). Companion to routing and realtime; the three share one pack version. `locationType` and `wheelchairBoarding` are GTFS integer codes, not enums, so an unrecognized code passes through unchanged."
+    "version": "1.3",
+    "description": "Stop text and geo search, key-authenticated. Companion to routing and realtime; the three share one pack version. A member that has no value is absent, never null. `locationType` is a closed set (`0`, `1`); `wheelchairBoarding` is the feed's GTFS integer code, and an unrecognised code passes through unchanged. A path that matches no operation, and every path of an environment without a stop-search deployment, is the gateway's plain-text `404 Not Found`, outside every operation."
   },
   "servers": [
     {
@@ -25,7 +25,7 @@
     "/stops/v1/search": {
       "post": {
         "summary": "Search Stops",
-        "description": "Stop text/geo search.",
+        "description": "Stop text and geo search over the environment's stops, a station's platforms folded into it.\n- `POST` only; another method is a 405 `method_not_allowed`. Any query parameter is a 400 `<name> is not allowed`.\n- The body takes `q` and `limit` (1 to 50), and optionally `filter` and `sort`. A key not listed is refused whatever its value, null included; `null` on an optional member means absent. Nothing is clamped.\n- `sort` orders by distance with `_geoPoint(lat, lng):asc` or `:desc`; each hit then carries `_geoDistance` in metres.\n- A `filter` or `sort` expression the index refuses is a 400 `filter is invalid` or `sort is invalid`.\n- A member that has no value is absent from a hit, never null.",
         "operationId": "stops_search",
         "x-surface": "stops",
         "requestBody": {
@@ -37,9 +37,9 @@
               },
               "example": {
                 "q": "",
-                "filter": "_geoRadius(49.1951, 16.6068, 500)",
+                "filter": "_geoRadius(49.2237, 16.5781, 500)",
                 "sort": [
-                  "_geoPoint(49.1951, 16.6068):asc"
+                  "_geoPoint(49.2237, 16.5781):asc"
                 ],
                 "limit": 10
               }
@@ -53,12 +53,68 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/StopSearchResponse"
+                },
+                "example": {
+                  "hits": [
+                    {
+                      "gtfsId": "1:U1660Z3",
+                      "name": "Technická",
+                      "locationType": 0,
+                      "wheelchairBoarding": 1,
+                      "modes": [
+                        "BUS"
+                      ],
+                      "lat": 49.223701,
+                      "lon": 16.578091,
+                      "country": "Česko",
+                      "region": "Jihomoravský kraj",
+                      "district": "Brno-město",
+                      "city": "Brno",
+                      "suburb": "Královo Pole",
+                      "_geoDistance": 7
+                    },
+                    {
+                      "gtfsId": "1:U1155Z1",
+                      "name": "Horská",
+                      "locationType": 0,
+                      "wheelchairBoarding": 1,
+                      "modes": [
+                        "BUS"
+                      ],
+                      "lat": 49.221621,
+                      "lon": 16.579517,
+                      "country": "Česko",
+                      "region": "Jihomoravský kraj",
+                      "district": "Brno-město",
+                      "city": "Brno",
+                      "suburb": "Královo Pole",
+                      "_geoDistance": 253
+                    },
+                    {
+                      "gtfsId": "1:U1777Z3",
+                      "name": "Záhřebská",
+                      "locationType": 0,
+                      "wheelchairBoarding": 0,
+                      "modes": [
+                        "BUS"
+                      ],
+                      "lat": 49.22001,
+                      "lon": 16.579572,
+                      "country": "Česko",
+                      "region": "Jihomoravský kraj",
+                      "district": "Brno-město",
+                      "city": "Brno",
+                      "suburb": "Královo Pole",
+                      "_geoDistance": 424
+                    }
+                  ],
+                  "query": ""
                 }
               }
             }
           },
-          "401": {
-            "description": "Missing or invalid apikey.",
+          "400": {
+            "description": "A missing, malformed, out-of-range or unknown member, or a `filter` or `sort` expression the index refuses; `field` names it. Nothing is clamped. A body that is empty, not JSON or not an object is `body is invalid` with no `field`. Any query parameter is `<name> is not allowed`, `field` naming it.",
             "content": {
               "application/json": {
                 "schema": {
@@ -67,18 +123,18 @@
               }
             }
           },
-          "4XX": {
-            "description": "Stop-search error: a 400 whose message names the field when `limit` is missing, not an integer or out of range, or the body has a key it doesn't accept; or a search error such as filtering a non-filterable attribute.",
+          "401": {
+            "description": "The `apikey` header is missing (`key_missing`) or holds no valid key (`key_invalid`).",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/StopSearchError"
+                  "$ref": "#/components/schemas/ErrorResponse"
                 }
               }
             }
           },
           "403": {
-            "description": "Forbidden — the key is not permitted for this operation.",
+            "description": "The key is not allowed on this operation (`key_not_allowed`), or the agreement it belongs to is inactive (`agreement_inactive`).",
             "content": {
               "application/json": {
                 "schema": {
@@ -88,7 +144,37 @@
             }
           },
           "429": {
-            "description": "Rate limit exceeded.",
+            "description": "The key's rate limit is reached (`rate_limited`).",
+            "headers": {
+              "Retry-After": {
+                "description": "Seconds until a request is admitted again.",
+                "schema": {
+                  "type": "integer"
+                }
+              },
+              "X-RateLimit-Limit": {
+                "description": "Requests the key may make per rate-limit window.",
+                "schema": {
+                  "type": "integer"
+                }
+              },
+              "X-RateLimit-Reset": {
+                "description": "Unix seconds at which the rate-limit window resets.",
+                "schema": {
+                  "type": "integer"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "description": "Another client error: 404 `not_found`, 405 `method_not_allowed`, 411 `length_required` (a body without a length) or 413 `payload_too_large`.",
             "content": {
               "application/json": {
                 "schema": {
@@ -98,7 +184,7 @@
             }
           },
           "5XX": {
-            "description": "Server error.",
+            "description": "From Spider, an ErrorResponse: `internal_error`, `upstream_unavailable` or `upstream_timeout`. A network intermediary in front of Spider may answer a 5XX with a body that is not JSON.",
             "content": {
               "application/json": {
                 "schema": {
@@ -123,35 +209,45 @@
     "schemas": {
       "StopSearchRequest": {
         "type": "object",
-        "description": "POST body for `/stops/v1/search`. The body accepts only `q`, `filter`, `sort` and `limit`; any other key is an HTTP 400 naming that key. `filter` and `sort` are search-index expressions the client composes (not modeled shapes). Filterable `StopHit` fields: `gtfsId`, the admin levels (`country`, `region`, `district`, `city`, `suburb`), `locationType`, `wheelchairBoarding` and `modes`; `_geo` (the stop's position) is filterable and sortable. The other `StopHit` fields (`name`, `code`, `lat`, `lon`) aren't filterable, and a filter on one of them fails with a `StopSearchError`. Filtering on an admin level the environment wasn't enriched with matches no stops rather than failing.",
+        "description": "POST body for `/stops/v1/search`, at most 64 KiB (a larger body is a 413). The body accepts only `q`, `filter`, `sort` and `limit`; any other key is a 400 `<key> is not allowed`, whatever its value, null included. A body that is empty, not JSON or not an object is a 400 `body is invalid`. `null` on an optional member means absent, and on a required member is a 400 `<key> is required`. `filter` and `sort` are search-index expressions the client composes (not modeled shapes); an expression the index refuses is a 400 `filter is invalid` or `sort is invalid` naming it.",
         "properties": {
           "q": {
             "type": "string",
-            "description": "Search text, matched against the stop's `name`, its `code`, its town (`city`) and the district within the town (`suburb`); town and district only where the environment has them."
+            "description": "Search text, matched against the stop's `name`, its `code`, its town (`city`) and the district within the town (`suburb`); town and district only where the environment has them. An empty string matches every stop. Another type is a 400 `q is invalid`."
           },
           "filter": {
-            "type": "string",
-            "description": "Search filter expression. Supports admin-level equality (e.g. `city = \"Brno\"`), by-id lookup (`gtfsId = \"1:39822\"`), stop kind (`locationType = 1` for stations; `locationType != 1` for everything else, which also matches stops that omit the field), accessibility (`wheelchairBoarding = 1`), mode (`modes = RAIL` for stops a rail route serves), radius (`_geoRadius(lat, lng, meters)`), and bounding box (`_geoBoundingBox([maxLat, maxLng], [minLat, minLng])`). Combine multiple with ` AND `."
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "A filter expression: conditions `attribute OPERATOR value` combined with `AND`, `OR` and `NOT`, read left to right, grouped with parentheses. Operators: `=`, `!=`, `>`, `>=`, `<`, `<=`, `low TO high` (an inclusive range), `IN [a, b]`, `EXISTS`, `IS NULL` and `IS EMPTY`, the last four negatable with `NOT` (`NOT IN`, `NOT EXISTS`, `IS NOT NULL`, `IS NOT EMPTY`). A value with whitespace, or one that reads as an operator, is quoted with `'` or `\"`. Geo conditions: `_geoRadius(lat, lng, metres)`, `_geoBoundingBox([northLat, eastLng], [southLat, westLng])` and `_geoPolygon([lat, lng], [lat, lng], [lat, lng], ...)` (three or more vertices). Filterable attributes: `gtfsId`, the admin levels (`country`, `region`, `district`, `city`, `suburb`), `locationType`, `wheelchairBoarding`, `modes` and `_geo` (the stop's position). Examples: `city = \"Brno\"`, `gtfsId = \"1:39822\"`, `locationType = 1` (stations), `locationType != 1` (everything else, stops that omit the field included), `wheelchairBoarding = 1`, `modes = RAIL` (stops a rail route serves), `_geoRadius(49.1951, 16.6068, 500)`. An attribute that isn't filterable or a malformed expression is a 400 `filter is invalid`; filtering on an admin level the environment wasn't enriched with matches no stops. A filter array or another type is a 400 `filter is invalid`."
           },
           "sort": {
-            "type": "array",
-            "description": "Sort expressions, e.g. [\"_geoPoint(lat, lng):asc\"] to order by distance (nearest-stop). Requires _geo (present).",
+            "type": [
+              "array",
+              "null"
+            ],
+            "description": "Sort expressions. The one sortable attribute is the stop's position: `_geoPoint(lat, lng):asc` orders by distance from that point, nearest first, and `:desc` farthest first; each hit then carries `_geoDistance`. Any other expression is a 400 `sort is invalid`. Absent orders by relevance.",
             "items": {
               "type": "string"
             }
           },
           "limit": {
             "type": "integer",
-            "description": "Max hits to return, an integer from 1 to 50. A missing, non-integer or out-of-range value is an HTTP 400 naming `limit`."
+            "description": "Max hits to return, an integer from 1 to 50. Missing is a 400 `limit is required`, not an integer `limit is invalid`, outside 1 to 50 `limit is out of range`; rejected, never clamped.",
+            "minimum": 1.0,
+            "maximum": 50.0
           }
         },
         "required": [
           "q",
           "limit"
-        ]
+        ],
+        "additionalProperties": false
       },
       "StopSearchResponse": {
         "type": "object",
+        "description": "Search hits. The body can carry further members not listed here; they aren't part of the contract and may change or disappear.",
         "properties": {
           "hits": {
             "type": "array",
@@ -160,7 +256,8 @@
             }
           },
           "query": {
-            "type": "string"
+            "type": "string",
+            "description": "The `q` searched."
           }
         },
         "required": [
@@ -170,7 +267,7 @@
       },
       "StopHit": {
         "type": "object",
-        "description": "One stop. A station's platforms are folded into it, so the station is returned instead of its platforms. Admin levels are populated only where the deployment enriched them; the other optional fields are absent when the feed doesn't provide them. A hit can carry further fields not listed here; they aren't part of the contract and may change or disappear, so ignore them.",
+        "description": "One stop. A station's platforms are folded into it, so the station is returned instead of its platforms. Admin levels are present only where the deployment enriched them; the other optional members are absent when the feed doesn't provide them. A hit can carry further members not listed here; they aren't part of the contract and may change or disappear.",
         "properties": {
           "gtfsId": {
             "type": "string",
@@ -186,7 +283,9 @@
           "locationType": {
             "type": "integer",
             "format": "int32",
-            "description": "GTFS `location_type`: `0` a stop or platform, `1` a station (its platforms folded into it). Absent when the feed doesn't set it, which means a stop. No other values are returned."
+            "description": "GTFS `location_type`: `0` a stop or platform, `1` a station (its platforms folded into it). Absent when the feed doesn't set it, which means a stop. No other values are returned.",
+            "minimum": 0.0,
+            "maximum": 1.0
           },
           "wheelchairBoarding": {
             "type": "integer",
@@ -201,10 +300,12 @@
             }
           },
           "lat": {
-            "type": "number"
+            "type": "number",
+            "description": "Latitude in degrees."
           },
           "lon": {
-            "type": "number"
+            "type": "number",
+            "description": "Longitude in degrees."
           },
           "country": {
             "type": "string"
@@ -220,50 +321,39 @@
           },
           "suburb": {
             "type": "string"
+          },
+          "_geoDistance": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Metres from the `_geoPoint` the request sorts by; present only when it sorts by `_geoPoint`."
           }
         },
         "required": [
           "gtfsId",
-          "name"
-        ]
-      },
-      "StopSearchError": {
-        "type": "object",
-        "properties": {
-          "message": {
-            "type": "string"
-          },
-          "code": {
-            "type": "string"
-          },
-          "type": {
-            "type": "string"
-          },
-          "link": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "message"
+          "name",
+          "lat",
+          "lon"
         ]
       },
       "ErrorResponse": {
         "type": "object",
-        "description": "Error body: a stable machine-readable `code` (a state name) and a human-readable `message`.",
+        "description": "Error body: a stable machine-readable `code`, which names a state, and a human-readable `message`.",
         "properties": {
           "code": {
-            "type": "string"
+            "type": "string",
+            "description": "One of `bad_request`, `key_missing`, `key_invalid`, `key_not_allowed`, `agreement_inactive`, `planning_limit_reached`, `not_found`, `method_not_allowed`, `length_required`, `payload_too_large`, `rate_limited`, `internal_error`, `upstream_unavailable`, `upstream_timeout`. New codes may be added."
           },
           "message": {
             "type": "string",
-            "description": "For bad_request: `<field> is required|invalid|out of range|not allowed`."
+            "description": "For `bad_request`: `<field> is required|invalid|out of range|not allowed`, or `body is invalid` when the body is empty, not JSON or not an object."
           },
           "field": {
             "type": "string",
-            "description": "The request member a 400 names, as a dot path from the body root (array positions omitted)."
+            "description": "Present only on a 400 that names one member: its dot path from the body root, array positions omitted, or the query parameter's name."
           }
         },
         "required": [
+          "code",
           "message"
         ]
       }

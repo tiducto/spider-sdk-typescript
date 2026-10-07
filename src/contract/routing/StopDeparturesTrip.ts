@@ -4,7 +4,7 @@ import type { WheelchairBoarding } from './WheelchairBoarding.ts';
 
 export interface StopDeparturesTrip {
   gtfsId: string;
-  bikesAllowed?: BikesAllowed;
-  wheelchairAccessible?: WheelchairBoarding;
+  bikesAllowed: BikesAllowed;
+  wheelchairAccessible: WheelchairBoarding;
   route: StopDeparturesRoute;
 }

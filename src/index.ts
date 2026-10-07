@@ -32,7 +32,7 @@ export type {
 } from './routing.ts';
 export { SpiderStops } from './stops.ts';
 export type { Stop, StopFilter, GeoPoint, GeoBoundingBox } from './stops.ts';
-export { SpiderRealtime, delayFor } from './realtime.ts';
+export { SpiderRealtime } from './realtime.ts';
 export type {
   FeedFreshness,
   LiveVehicle,
@@ -40,7 +40,6 @@ export type {
   VehiclePositions,
   StopTimeUpdate,
   TripDelay,
-  ServiceDateDelays,
   TripDelays,
   ServiceAlert,
   AlertActivePeriod,

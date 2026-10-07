@@ -1,6 +1,6 @@
 /** Walking preferences. */
 export interface WalkPreferencesInput {
-  /** Walking speed on flat ground in metres per second, at least 0.1; rejected, never clamped. */
+  /** Walking speed on flat ground in metres per second, at least 0.1 (0.1 included); rejected, never clamped. */
   speed?: number;
   /** How much worse walking is than riding for the same time, a multiplier from 0.1 to 100000; rejected, never clamped. */
   reluctance?: number;
