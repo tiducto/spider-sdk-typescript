@@ -6,6 +6,6 @@ export interface DepartureBoard {
   gtfsId: string;
   name: string;
   /** Null on a station board. */
-  wheelchairBoarding: WheelchairBoarding | unknown;
+  wheelchairBoarding: WheelchairBoarding | null;
   stoptimesWithoutPatterns: StopDeparturesStoptime[];
 }

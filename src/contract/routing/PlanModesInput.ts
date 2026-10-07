@@ -6,5 +6,5 @@ export interface PlanModesInput {
   directOnly?: boolean;
   /** Never a journey without a transit leg. */
   transitOnly?: boolean;
-  transit?: PlanTransitModesInput | unknown;
+  transit?: PlanTransitModesInput;
 }

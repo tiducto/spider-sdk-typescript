@@ -6,5 +6,5 @@ export interface RoutingError {
   code: RoutingErrorCode;
   description: string;
   /** The request member at fault; null when it is none in particular. */
-  inputField: InputField | unknown;
+  inputField: InputField | null;
 }

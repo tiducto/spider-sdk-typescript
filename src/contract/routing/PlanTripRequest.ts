@@ -14,8 +14,8 @@ export interface PlanTripRequest {
   destination: PlanLabeledLocationInput;
   /** Locations the journey must visit or pass through, in the order given, all of one kind: every entry `visit` or every entry `passThrough`; mixing them is a 400 `via is invalid`. How many a request takes is an environment setting, and an environment set to 0 has via turned off; more is a 400 `via is out of range`. A via stop id that resolves to no stop or station is a 200 with the `routingErrors` code `LOCATION_NOT_FOUND` on `VIA`. */
   via?: PlanViaLocationInput[];
-  modes?: PlanModesInput | unknown;
-  preferences?: PlanPreferencesInput | unknown;
+  modes?: PlanModesInput;
+  preferences?: PlanPreferencesInput;
   /** How much time after `dateTime` the search covers (before it, for `latestArrival`), as an ISO-8601 duration: above zero and at most the environment's search-window limit; rejected, never clamped. A cursor overrides it. */
   searchWindow: string;
   /** Itineraries on this page: 1 up to the environment's itinerary limit; rejected, never clamped. Absent means the limit. With `after` or no cursor, never with `before`. */
@@ -27,5 +27,5 @@ export interface PlanTripRequest {
   /** `pageInfo.endCursor` of a page, to fetch the page after it. Never with `before`. A `startCursor` here is a 400 `after is invalid`. */
   after?: string;
   /** Delay-aware planning level; omitted or null plans on the timetable alone. */
-  reliability?: Reliability | unknown;
+  reliability?: Reliability;
 }

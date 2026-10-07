@@ -8,13 +8,13 @@ import type { WheelchairBoarding } from './WheelchairBoarding.ts';
 export interface TripTimetable {
   gtfsId: string;
   /** `0` or `1`, as the feed gives it; null when it gives none. */
-  directionId: string;
+  directionId: string | null;
   /** Null when the feed has none. */
-  tripHeadsign: string;
+  tripHeadsign: string | null;
   bikesAllowed: BikesAllowed;
   wheelchairAccessible: WheelchairBoarding;
   route: TripRoute;
   stoptimesForDate: Stoptime[];
   /** The trip's path; null when the feed has no shapes. */
-  tripGeometry: TripGeometry | unknown;
+  tripGeometry: TripGeometry | null;
 }

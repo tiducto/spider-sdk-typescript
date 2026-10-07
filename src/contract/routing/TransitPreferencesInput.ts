@@ -5,9 +5,9 @@ import type { TransitFilterInput } from './TransitFilterInput.ts';
 
 /** Transit preferences. */
 export interface TransitPreferencesInput {
-  transfer?: TransferPreferencesInput | unknown;
-  board?: BoardPreferencesInput | unknown;
-  alight?: AlightPreferencesInput | unknown;
+  transfer?: TransferPreferencesInput;
+  board?: BoardPreferencesInput;
+  alight?: AlightPreferencesInput;
   /** Routes or agencies to leave out of the search. */
   filters?: TransitFilterInput[];
 }

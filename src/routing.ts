@@ -30,13 +30,8 @@ import type {
   PlanTripRequest,
   PlanTripResponse,
   PlanViaLocationInput,
-  RealTimeEstimate,
-  Route as RouteWire,
   RoutingError as RoutingErrorWire,
-  Stop as StopWire,
   TransitMode as WireTransitMode,
-  Trip as TripWire,
-  TripGeometry,
   TripRequest,
   TripResponse,
   TripTimetable,
@@ -491,7 +486,7 @@ export class SpiderRouting {
         startTime: options?.startTime != null ? Math.floor(toEpochMs(options.startTime) / 1000) : undefined,
         timeRange,
       };
-      const stop = (await this.transport.postJson<DeparturesResponse>(DEPARTURES_PATH, body)).stop as DepartureBoard | null;
+      const stop = (await this.transport.postJson<DeparturesResponse>(DEPARTURES_PATH, body)).stop;
       if (stop == null) {
         throw new TransportError('no_data', `routing returned no stop or station for id=${stopId}`);
       }
@@ -507,7 +502,7 @@ export class SpiderRouting {
     if (invalid != null) return failure(invalid);
     try {
       const body: TripRequest = { id: tripId, serviceDate };
-      const trip = (await this.transport.postJson<TripResponse>(TRIP_PATH, body)).trip as TripTimetable | null;
+      const trip = (await this.transport.postJson<TripResponse>(TRIP_PATH, body)).trip;
       if (trip == null) {
         throw new TransportError('no_data', `routing returned no trip for id=${tripId}`);
       }
@@ -711,7 +706,7 @@ function mapRoutingError(re: RoutingErrorWire): RoutingError {
   return {
     code: routingErrorCodeFromWire(re.code),
     description: re.description,
-    inputField: inputFieldFromWire(re.inputField as string | null),
+    inputField: inputFieldFromWire(re.inputField),
   };
 }
 
@@ -728,12 +723,12 @@ function mapItinerary(node: ItineraryWire): Itinerary {
 }
 
 function mapLeg(leg: LegWire): Leg {
-  const startEstimated = leg.start.estimated as RealTimeEstimate | null;
-  const endEstimated = leg.end.estimated as RealTimeEstimate | null;
-  const fromStop = leg.from.stop as StopWire | null;
-  const toStop = leg.to.stop as StopWire | null;
-  const route = leg.route as RouteWire | null;
-  const trip = leg.trip as TripWire | null;
+  const startEstimated = leg.start.estimated;
+  const endEstimated = leg.end.estimated;
+  const fromStop = leg.from.stop;
+  const toStop = leg.to.stop;
+  const route = leg.route;
+  const trip = leg.trip;
   return {
     mode: transitModeFromWire(leg.mode),
     startScheduled: leg.start.scheduledTime,
@@ -799,7 +794,7 @@ function mapDepartures(stop: DepartureBoard): Departure[] {
 
 function mapTrip(trip: TripTimetable): TripDetails {
   const first = trip.stoptimesForDate[0];
-  const geometry = trip.tripGeometry as TripGeometry | null;
+  const geometry = trip.tripGeometry;
   const stops: TripStop[] = trip.stoptimesForDate.map((st) => {
     const s = st.stop;
     const at = (offset: number): number => (st.serviceDay + offset) * 1000;
