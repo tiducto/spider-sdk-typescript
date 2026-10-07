@@ -8,7 +8,7 @@ test('maps HTTP statuses to error codes', () => {
   assert.equal(toSpiderError(new TransportError('http', 'x', 403)).code, 'unauthorized');
   assert.equal(toSpiderError(new TransportError('http', 'x', 404)).code, 'not_found');
   assert.equal(toSpiderError(new TransportError('http', 'x', 408)).code, 'timeout');
-  assert.equal(toSpiderError(new TransportError('http', 'x', 410)).code, 'query_retired');
+  assert.equal(toSpiderError(new TransportError('http', 'x', 410)).code, 'unknown');
   assert.equal(toSpiderError(new TransportError('http', 'x', 429)).code, 'rate_limited');
   assert.equal(toSpiderError(new TransportError('http', 'x', 503)).code, 'server');
   assert.equal(toSpiderError(new TransportError('http', 'x', 418)).code, 'unknown');
@@ -53,21 +53,6 @@ test('parseErrorEnvelope takes a code-shaped gateway `error` as the code, but no
   );
 });
 
-test('a 410 or a query_retired body is query_retired with the body message, else a fixed one', () => {
-  const retired = toSpiderError(httpFailure('POST /routing/v1/plan', 410, '{"code":"query_retired","message":"this API version is retired"}'));
-  assert.equal(retired.code, 'query_retired');
-  assert.equal(retired.httpStatus, 410);
-  assert.equal(retired.serverCode, 'query_retired');
-  assert.equal(retired.message, 'this API version is retired');
-  // The body code decides even when a proxy rewrites the status, and 410 alone is the fallback.
-  const rewritten = toSpiderError(httpFailure('POST /routing/v1/plan', 400, '{"error":"query_retired"}'));
-  assert.equal(rewritten.code, 'query_retired');
-  assert.equal(rewritten.message, 'this API part is retired');
-  const bare = toSpiderError(httpFailure('POST /routing/v1/plan', 410, ''));
-  assert.equal(bare.code, 'query_retired');
-  assert.equal(bare.message, 'this API part is retired');
-});
-
 for (const [code, message] of [
   ['planning_limit_reached', 'trip planning limit reached'],
   ['agreement_inactive', 'agreement is not active'],
@@ -81,7 +66,7 @@ for (const [code, message] of [
   });
 
   test(`the ${code} body code wins over a rewritten status`, () => {
-    for (const status of [400, 401, 404, 410, 429, 500, 502]) {
+    for (const status of [400, 401, 404, 429, 500, 502]) {
       const err = toSpiderError(httpFailure('GET /realtime/v1/alerts', status, JSON.stringify({ error: code, message })));
       assert.equal(err.code, code, `status ${status}`);
       assert.equal(err.httpStatus, status);

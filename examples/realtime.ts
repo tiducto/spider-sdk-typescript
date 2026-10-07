@@ -1,8 +1,8 @@
 import { SpiderClient, pollVehicles } from '@tiducto/spider-sdk-typescript'
 
-export function poll(client: SpiderClient, tripIds: string[], serviceDate: string, updateBoard: (data: unknown) => void) {
+export function poll(client: SpiderClient, serviceDate: string, tripIds: string[], updateBoard: (data: unknown) => void) {
   setInterval(async () => {
-    const result = await client.realtime.delays(tripIds, serviceDate)
+    const result = await client.realtime.delays(serviceDate, tripIds)
     if (result.isSuccess) {
       updateBoard(result.data)
     } else {
@@ -46,14 +46,13 @@ export async function vehicleForTrip(client: SpiderClient, tripId: string) {
   }
 }
 
-export async function delays(client: SpiderClient, tripIds: string[], serviceDate: string) {
-  const result = await client.realtime.delays(tripIds, serviceDate)
+export async function delays(client: SpiderClient, serviceDate: string, tripIds: string[]) {
+  const result = await client.realtime.delays(serviceDate, tripIds)
   if (result.isSuccess) {
-    for (const group of result.data.groups) {
-      for (const delay of group.delays) {
-        const minutes = Math.trunc((delay.delaySeconds ?? 0) / 60)
-        console.log(`${delay.tripId}: ${minutes >= 0 ? '+' : ''}${minutes} min`)
-      }
+    for (const delay of result.data.delays) {
+      if (delay.delaySeconds === null) continue
+      const minutes = Math.trunc(delay.delaySeconds / 60)
+      console.log(`${delay.tripId}: ${minutes >= 0 ? '+' : ''}${minutes} min`)
     }
   } else {
     console.error('Failed to load delays:', result.error)

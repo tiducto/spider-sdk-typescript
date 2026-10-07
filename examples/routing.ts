@@ -222,9 +222,6 @@ export async function planWithErrorHandling(client: SpiderClient) {
     case 'unauthorized':
       console.error('Bad or missing apikey — it is scoped to one project + environment')
       break
-    case 'query_retired':
-      console.error('The API part this SDK version calls is retired — upgrade the SDK')
-      break
     case 'planning_limit_reached':
       console.error('The project has reached the trip planning limit its plan includes')
       break

@@ -27,6 +27,7 @@ test('chunk maps itineraries with realtime delays', () => {
         start: '2026-07-15T08:00:00Z',
         end: '2026-07-15T08:30:00Z',
         duration: 1800,
+        waitingTime: 0,
         legs: [
           {
             mode: 'BUS',
@@ -36,11 +37,15 @@ test('chunk maps itineraries with realtime delays', () => {
             realtimeState: 'UPDATED',
             realTime: true,
             serviceDate: '2026-07-15',
-            from: { name: 'Origin', stop: { gtfsId: '1:A' } },
-            to: { name: 'Dest', stop: { gtfsId: '1:B' } },
-            route: { shortName: '12' },
-            trip: { gtfsId: '1:T' },
+            from: { name: 'Origin', stop: { gtfsId: '1:A', wheelchairBoarding: 'NO_INFORMATION', platformCode: null, zoneId: null } },
+            to: { name: 'Dest', stop: { gtfsId: '1:B', wheelchairBoarding: 'NO_INFORMATION', platformCode: null, zoneId: null } },
+            route: { gtfsId: '1:L12', shortName: '12', longName: null, color: null, textColor: null },
+            headsign: null,
+            distance: 5000,
+            duration: 1800,
+            trip: { gtfsId: '1:T', bikesAllowed: 'NO_INFORMATION' },
             interlineWithPreviousLeg: true,
+            legGeometry: { points: '_p~iF~ps|U' },
           },
         ],
       },
@@ -68,10 +73,10 @@ test('chunk maps itineraries with realtime delays', () => {
   assert.equal(leg.interlineWithPreviousLeg, true);
   assert.equal(leg.fromName, 'Origin');
   assert.equal(leg.fromGtfsId, '1:A');
-  // Display fields the wire leaves out are null.
+  // Null display fields stay null.
   assert.equal(leg.fromPlatformCode, null);
   assert.equal(leg.toZoneId, null);
-  assert.equal(leg.routeGtfsId, null);
+  assert.equal(leg.routeGtfsId, '1:L12');
   assert.equal(leg.routeColor, null);
   assert.equal(leg.routeTextColor, null);
 });

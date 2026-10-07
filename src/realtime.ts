@@ -14,12 +14,12 @@ export interface FeedFreshness {
 
 /** A vehicle's live position. `tripId`, `routeId`, `stopId` and `vehicleId` are feed-prefixed (`<feedId>:<id>`). */
 export interface LiveVehicle {
-  readonly tripId: string | null;
+  readonly tripId: string;
   readonly routeId: string | null;
   readonly vehicleId: string | null;
   readonly label: string | null;
-  readonly latitude: number | null;
-  readonly longitude: number | null;
+  readonly latitude: number;
+  readonly longitude: number;
   readonly bearing: number | null;
   readonly speed: number | null;
   readonly stopId: string | null;
@@ -47,34 +47,21 @@ export interface StopTimeUpdate {
   readonly scheduleRelationship: string | null;
 }
 
+/** A trip's live delay. `tripId` and `routeId` are feed-prefixed (`<feedId>:<id>`). */
 export interface TripDelay {
-  readonly tripId: string | null;
+  readonly tripId: string;
   readonly routeId: string | null;
   readonly delaySeconds: number | null;
   readonly scheduleRelationship: string | null;
   readonly stopTimeUpdates: readonly StopTimeUpdate[];
 }
 
-/** Delays for one GTFS service date: those the feed reported, and the `missing` trip ids it didn't. */
-export interface ServiceDateDelays {
+/** Result of {@link SpiderRealtime.delays}: the delays the feed reported for one service date, and the `missing` trip ids it didn't. */
+export interface TripDelays {
   readonly serviceDate: string;
   readonly delays: readonly TripDelay[];
   readonly missing: readonly string[];
-}
-
-/**
- * Result of {@link SpiderRealtime.delays}: delays grouped by service date (the same `tripId` on two dates is
- * two distinct instances), plus feed freshness. Look up a single instance with {@link delayFor}.
- */
-export interface TripDelays {
-  readonly groups: readonly ServiceDateDelays[];
   readonly freshness: FeedFreshness;
-}
-
-/** The delay for the (`tripId`, `serviceDate`) instance, if the feed reported one; otherwise null. */
-export function delayFor(delays: TripDelays, tripId: string, serviceDate: string): TripDelay | null {
-  const group = delays.groups.find((g) => g.serviceDate === serviceDate);
-  return group?.delays.find((d) => d.tripId === tripId) ?? null;
 }
 
 export interface AlertActivePeriod {
@@ -90,7 +77,7 @@ export interface AlertInformedEntity {
 }
 
 export interface ServiceAlert {
-  readonly id: string | null;
+  readonly id: string;
   readonly cause: string | null;
   readonly effect: string | null;
   readonly severityLevel: string | null;
@@ -108,7 +95,6 @@ export interface ServiceAlerts {
 
 const EMPTY_FRESHNESS: FeedFreshness = { feedTimestampEpochMs: null, staleSeconds: null };
 const EMPTY_POSITIONS: VehiclePositions = { vehicles: [], missing: [], freshness: EMPTY_FRESHNESS };
-const EMPTY_DELAYS: TripDelays = { groups: [], freshness: EMPTY_FRESHNESS };
 const MAX_TRIP_IDS = 50;
 
 export class SpiderRealtime {
@@ -118,7 +104,10 @@ export class SpiderRealtime {
     this.transport = transport;
   }
 
-  /** Live positions for up to 50 trips. Empty input skips the call; more than 50 fails as `bad_request` without a request. */
+  /**
+   * Live positions for up to 50 feed-prefixed trip ids (`<feedId>:<id>`), sent untouched. Empty input skips the
+   * call; more than 50 fails as `bad_request` without a request.
+   */
   async vehicles(tripIds: readonly string[]): Promise<SpiderResult<VehiclePositions>> {
     if (tripIds.length === 0) return success(EMPTY_POSITIONS);
     if (tripIds.length > MAX_TRIP_IDS) return failure(badRequest('tripIds'));
@@ -127,8 +116,8 @@ export class SpiderRealtime {
         tripIds: tripIds.join(','),
       });
       return success({
-        vehicles: (dto.vehicles ?? []).map(mapVehicle),
-        missing: dto.missing ?? [],
+        vehicles: dto.vehicles.map(mapVehicle),
+        missing: dto.missing,
         freshness: mapFreshness(dto),
       });
     } catch (e) {
@@ -136,6 +125,7 @@ export class SpiderRealtime {
     }
   }
 
+  /** The live position of one feed-prefixed trip id (`<feedId>:<id>`), sent untouched; `vehicle` is null when none reports. */
   async vehicleForTrip(tripId: string): Promise<SpiderResult<LiveVehicleUpdate>> {
     const path = `/realtime/v1/vehicles/by-trip/${encodeURIComponent(tripId)}`;
     try {
@@ -150,7 +140,7 @@ export class SpiderRealtime {
       }
       const dto = parseJson<VehicleByTripResponseWire>(raw.text, path);
       return success({
-        vehicle: dto.vehicle != null ? mapVehicle(dto.vehicle) : null,
+        vehicle: dto.vehicle !== undefined ? mapVehicle(dto.vehicle) : null,
         freshness: mapFreshness(dto),
       });
     } catch (e) {
@@ -159,34 +149,27 @@ export class SpiderRealtime {
   }
 
   /**
-   * Live delays, resolved per `(tripId, serviceDate)` instance: group trip ids by the GTFS service date
-   * (ISO `YYYY-MM-DD`) they run on — pass each plan leg's or departure's `serviceDate` through. Up to 50 trip ids
-   * in total across all dates. Empty input skips the call; a malformed date or more than 50 ids fails as
-   * `bad_request` without a request.
+   * Live delays for trips on one GTFS service date (ISO `YYYY-MM-DD`, a plan leg's or departure's `serviceDate`).
+   * Trip ids are feed-prefixed (`<feedId>:<id>`), as routing returns them, and sent untouched; duplicates are
+   * dropped and the rest sorted, so equal requests share a cache entry. A malformed date, no ids, a blank id or
+   * more than 50 distinct ids fails as `bad_request` without a request.
    */
-  async delays(byServiceDate: Readonly<Record<string, readonly string[]>>): Promise<SpiderResult<TripDelays>>;
-  /** Live delays for `tripIds` all on one `serviceDate` (ISO `YYYY-MM-DD`) — the common single-day case. */
-  async delays(tripIds: readonly string[], serviceDate: string): Promise<SpiderResult<TripDelays>>;
-  async delays(
-    arg: Readonly<Record<string, readonly string[]>> | readonly string[],
-    serviceDate?: string,
-  ): Promise<SpiderResult<TripDelays>> {
-    const byServiceDate = serviceDate !== undefined
-      ? { [serviceDate]: arg as readonly string[] }
-      : arg as Readonly<Record<string, readonly string[]>>;
-    const queries = Object.entries(byServiceDate).map(([date, tripIds]) => ({ serviceDate: date, tripIds: [...tripIds] }));
-    for (const q of queries) {
-      const invalid = invalidServiceDate(q.serviceDate);
-      if (invalid != null) return failure(invalid);
-    }
-    const total = queries.reduce((n, q) => n + q.tripIds.length, 0);
-    if (total === 0) return success(EMPTY_DELAYS);
-    if (total > MAX_TRIP_IDS) return failure(badRequest('tripIds'));
+  async delays(serviceDate: string, tripIds: readonly string[]): Promise<SpiderResult<TripDelays>> {
+    const invalid = invalidServiceDate(serviceDate);
+    if (invalid != null) return failure(invalid);
+    const ids = [...new Set(tripIds)].sort();
+    if (ids.length === 0) return failure(badRequest('tripIds', 'is required'));
+    if (ids.some((id) => id.trim() === '')) return failure(badRequest('tripIds', 'is invalid'));
+    if (ids.length > MAX_TRIP_IDS) return failure(badRequest('tripIds'));
     try {
-      const request: DelaysRequestWire = { queries };
-      const dto = await this.transport.postJson<DelaysResponseWire>('/realtime/v1/delays', request);
+      const dto = await this.transport.getJson<DelaysResponseWire>('/realtime/v1/delays', {
+        serviceDate,
+        tripIds: ids.join(','),
+      });
       return success({
-        groups: (dto.results ?? []).map(mapGroupResult),
+        serviceDate: dto.serviceDate,
+        delays: dto.delays.map(mapDelay),
+        missing: dto.missing,
         freshness: mapFreshness(dto),
       });
     } catch (e) {
@@ -198,7 +181,7 @@ export class SpiderRealtime {
     try {
       const dto = await this.transport.getJson<AlertsResponseWire>('/realtime/v1/alerts');
       return success({
-        alerts: (dto.alerts ?? []).map(mapAlert),
+        alerts: dto.alerts.map(mapAlert),
         freshness: mapFreshness(dto),
       });
     } catch (e) {
@@ -217,12 +200,12 @@ function mapFreshness(dto: FreshnessWire): FeedFreshness {
 
 function mapVehicle(v: VehicleDtoWire): LiveVehicle {
   return {
-    tripId: v.tripId ?? null,
+    tripId: v.tripId,
     routeId: v.routeId ?? null,
     vehicleId: v.vehicleId ?? null,
     label: v.label ?? null,
-    latitude: v.latitude ?? null,
-    longitude: v.longitude ?? null,
+    latitude: v.latitude,
+    longitude: v.longitude,
     bearing: v.bearing ?? null,
     speed: v.speed ?? null,
     stopId: v.stopId ?? null,
@@ -232,21 +215,13 @@ function mapVehicle(v: VehicleDtoWire): LiveVehicle {
   };
 }
 
-function mapGroupResult(g: DelayGroupResultDtoWire): ServiceDateDelays {
-  return {
-    serviceDate: g.serviceDate,
-    delays: (g.delays ?? []).map(mapDelay),
-    missing: g.missing ?? [],
-  };
-}
-
 function mapDelay(d: DelayDtoWire): TripDelay {
   return {
-    tripId: d.tripId ?? null,
+    tripId: d.tripId,
     routeId: d.routeId ?? null,
     delaySeconds: d.delaySeconds ?? null,
     scheduleRelationship: d.scheduleRelationship ?? null,
-    stopTimeUpdates: (d.stopTimeUpdates ?? []).map(mapStopTimeUpdate),
+    stopTimeUpdates: d.stopTimeUpdates.map(mapStopTimeUpdate),
   };
 }
 
@@ -262,18 +237,18 @@ function mapStopTimeUpdate(s: StopTimeUpdateDtoWire): StopTimeUpdate {
 
 function mapAlert(a: AlertDtoWire): ServiceAlert {
   return {
-    id: a.id ?? null,
+    id: a.id,
     cause: a.cause ?? null,
     effect: a.effect ?? null,
     severityLevel: a.severityLevel ?? null,
     headerText: a.headerText ?? null,
     descriptionText: a.descriptionText ?? null,
     url: a.url ?? null,
-    activePeriods: (a.activePeriods ?? []).map((p) => ({
+    activePeriods: a.activePeriods.map((p) => ({
       startEpochMs: secondsToMs(p.start),
       endEpochMs: secondsToMs(p.end),
     })),
-    informedEntities: (a.informedEntities ?? []).map((e) => ({
+    informedEntities: a.informedEntities.map((e) => ({
       agencyId: e.agencyId ?? null,
       routeId: e.routeId ?? null,
       tripId: e.tripId ?? null,
@@ -282,94 +257,82 @@ function mapAlert(a: AlertDtoWire): ServiceAlert {
   };
 }
 
+// The realtime surface omits a member it has no value for, never sends null.
 interface FreshnessWire {
-  feedTimestamp?: number | null;
-  staleSeconds?: number | null;
+  feedTimestamp?: number;
+  staleSeconds?: number;
 }
 
 interface VehicleDtoWire {
-  tripId?: string | null;
-  routeId?: string | null;
-  vehicleId?: string | null;
-  label?: string | null;
-  latitude?: number | null;
-  longitude?: number | null;
-  bearing?: number | null;
-  speed?: number | null;
-  stopId?: string | null;
-  currentStatus?: string | null;
-  occupancyStatus?: string | null;
-  timestamp?: number | null;
+  tripId: string;
+  routeId?: string;
+  vehicleId?: string;
+  label?: string;
+  latitude: number;
+  longitude: number;
+  bearing?: number;
+  speed?: number;
+  stopId?: string;
+  currentStatus?: string;
+  occupancyStatus?: string;
+  timestamp?: number;
 }
 
 interface VehiclesResponseWire extends FreshnessWire {
-  vehicles?: VehicleDtoWire[];
-  missing?: string[];
+  vehicles: VehicleDtoWire[];
+  missing: string[];
 }
 
 interface VehicleByTripResponseWire extends FreshnessWire {
-  vehicle?: VehicleDtoWire | null;
+  vehicle?: VehicleDtoWire;
 }
 
 interface DelayDtoWire {
-  tripId?: string | null;
-  routeId?: string | null;
-  delaySeconds?: number | null;
-  scheduleRelationship?: string | null;
-  stopTimeUpdates?: StopTimeUpdateDtoWire[];
+  tripId: string;
+  routeId?: string;
+  delaySeconds?: number;
+  scheduleRelationship?: string;
+  stopTimeUpdates: StopTimeUpdateDtoWire[];
 }
 
 interface StopTimeUpdateDtoWire {
-  stopId?: string | null;
-  stopSequence?: number | null;
-  arrivalDelay?: number | null;
-  departureDelay?: number | null;
-  scheduleRelationship?: string | null;
-}
-
-interface DelayQueryDtoWire {
-  serviceDate: string;
-  tripIds: string[];
-}
-
-interface DelaysRequestWire {
-  queries: DelayQueryDtoWire[];
-}
-
-interface DelayGroupResultDtoWire {
-  serviceDate: string;
-  delays?: DelayDtoWire[];
-  missing?: string[];
+  stopId?: string;
+  stopSequence?: number;
+  arrivalDelay?: number;
+  departureDelay?: number;
+  scheduleRelationship?: string;
 }
 
 interface DelaysResponseWire extends FreshnessWire {
-  results?: DelayGroupResultDtoWire[];
+  serviceDate: string;
+  delays: DelayDtoWire[];
+  missing: string[];
 }
 
 interface ActivePeriodDtoWire {
-  start?: number | null;
-  end?: number | null;
+  start?: number;
+  end?: number;
 }
 
 interface InformedEntityDtoWire {
-  agencyId?: string | null;
-  routeId?: string | null;
-  tripId?: string | null;
-  stopId?: string | null;
+  agencyId?: string;
+  routeId?: string;
+  tripId?: string;
+  stopId?: string;
 }
 
 interface AlertDtoWire {
-  id?: string | null;
-  cause?: string | null;
-  effect?: string | null;
-  severityLevel?: string | null;
-  headerText?: string | null;
-  descriptionText?: string | null;
-  url?: string | null;
-  activePeriods?: ActivePeriodDtoWire[];
-  informedEntities?: InformedEntityDtoWire[];
+  id: string;
+  cause?: string;
+  effect?: string;
+  severityLevel?: string;
+  headerText?: string;
+  descriptionText?: string;
+  url?: string;
+  activePeriods: ActivePeriodDtoWire[];
+  informedEntities: InformedEntityDtoWire[];
 }
 
 interface AlertsResponseWire extends FreshnessWire {
-  alerts?: AlertDtoWire[];
+  alerts: AlertDtoWire[];
 }

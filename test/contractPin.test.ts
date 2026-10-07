@@ -72,7 +72,7 @@ test('stops wire types match stops-openapi', () => {
     ['StopSearchRequest', 'StopSearchRequestWire'],
     ['StopSearchResponse', 'StopSearchResponseWire'],
     ['StopHit', 'StopHitWire'],
-    ['StopSearchError', 'StopSearchErrorWire'],
+    ['ErrorResponse', 'ErrorResponseWire'],
   ]);
 });
 
@@ -81,10 +81,7 @@ test('realtime wire types match realtime-openapi', () => {
     ['VehiclesResponse', 'VehiclesResponseWire'],
     ['VehicleByTripResponse', 'VehicleByTripResponseWire'],
     ['Vehicle', 'VehicleDtoWire'],
-    ['DelaysRequest', 'DelaysRequestWire'],
-    ['DelayQuery', 'DelayQueryDtoWire'],
     ['DelaysResponse', 'DelaysResponseWire'],
-    ['DelayGroupResult', 'DelayGroupResultDtoWire'],
     ['Delay', 'DelayDtoWire'],
     ['StopTimeUpdate', 'StopTimeUpdateDtoWire'],
     ['AlertsResponse', 'AlertsResponseWire'],

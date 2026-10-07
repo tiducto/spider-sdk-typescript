@@ -48,8 +48,6 @@ export type RoutingErrorCode =
   | 'LOCATION_NOT_FOUND'
   | 'NO_STOPS_IN_RANGE'
   | 'NO_TRANSIT_CONNECTION'
-  | 'NO_TRANSIT_CONNECTION_IN_SEARCH_WINDOW'
-  | 'OUTSIDE_BOUNDS'
   | 'OUTSIDE_SERVICE_PERIOD'
   | 'WALKING_BETTER_THAN_TRANSIT'
   | 'UNKNOWN';
@@ -79,8 +77,7 @@ const BIKES_ALLOWED: Known<BikesAllowed> = { ALLOWED: true, NOT_ALLOWED: true };
 const REALTIME_STATES: Known<RealtimeState> = { ADDED: true, CANCELED: true, MODIFIED: true, SCHEDULED: true, UPDATED: true };
 
 const ROUTING_ERROR_CODES: Known<RoutingErrorCode> = {
-  LOCATION_NOT_FOUND: true, NO_STOPS_IN_RANGE: true, NO_TRANSIT_CONNECTION: true,
-  NO_TRANSIT_CONNECTION_IN_SEARCH_WINDOW: true, OUTSIDE_BOUNDS: true, OUTSIDE_SERVICE_PERIOD: true,
+  LOCATION_NOT_FOUND: true, NO_STOPS_IN_RANGE: true, NO_TRANSIT_CONNECTION: true, OUTSIDE_SERVICE_PERIOD: true,
   WALKING_BETTER_THAN_TRANSIT: true,
 };
 
@@ -90,10 +87,14 @@ function decode<T extends string>(known: Known<T>, raw: string): T {
   return (Object.hasOwn(known, raw) ? raw : 'UNKNOWN') as T;
 }
 
+export function transitModeFromWire(raw: string): TransitMode;
+export function transitModeFromWire(raw: string | null | undefined): TransitMode | null;
 export function transitModeFromWire(raw: string | null | undefined): TransitMode | null {
   return raw == null ? null : decode(TRANSIT_MODES, raw);
 }
 
+export function realtimeStateFromWire(raw: string): RealtimeState;
+export function realtimeStateFromWire(raw: string | null | undefined): RealtimeState | null;
 export function realtimeStateFromWire(raw: string | null | undefined): RealtimeState | null {
   return raw == null ? null : decode(REALTIME_STATES, raw);
 }

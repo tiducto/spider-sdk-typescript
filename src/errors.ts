@@ -1,7 +1,6 @@
 /**
  * What went wrong. `bad_request` is an invalid or missing input, caught by the SDK before sending or
- * rejected by the server; `field` names it. `query_retired` means the API part this SDK version calls is
- * retired (HTTP 410 Gone); upgrade the SDK. `planning_limit_reached` means the project has reached the trip
+ * rejected by the server; `field` names it. `planning_limit_reached` means the project has reached the trip
  * planning limit its plan includes; it applies to trip planning only. `agreement_inactive` means the project has
  * no active agreement; it applies to every call made with a client key.
  */
@@ -11,7 +10,6 @@ export type SpiderErrorCode =
   | 'unauthorized'
   | 'bad_request'
   | 'not_found'
-  | 'query_retired'
   | 'planning_limit_reached'
   | 'agreement_inactive'
   | 'server'
@@ -23,15 +21,13 @@ export interface SpiderError {
   readonly code: SpiderErrorCode;
   readonly message: string;
   readonly httpStatus?: number;
-  /** The server's machine-readable error code, when it sends one: e.g. `bad_request` or `query_retired`. */
+  /** The server's machine-readable error code, when it sends one: e.g. `bad_request` or `rate_limited`. */
   readonly serverCode?: string;
   /** For a `bad_request`, the request member it names as a dot path, e.g. `preferences.transit.transfer.maximumTransfers`. */
   readonly field?: string;
   readonly cause?: unknown;
 }
 
-const QUERY_RETIRED = 'query_retired';
-const QUERY_RETIRED_MESSAGE = 'this API part is retired';
 // Plan-limit refusals: the body code names the state, and the fixed wording stands in for a body without a message.
 const LIMIT_MESSAGES = {
   planning_limit_reached: 'trip planning limit reached',
@@ -140,9 +136,6 @@ export function toSpiderError(e: unknown): SpiderError {
       const refusal = limitRefusal(e);
       if (refusal != null) return refusal;
       const status = e.httpStatus ?? 0;
-      if (e.serverCode === QUERY_RETIRED || status === 410) {
-        return { code: 'query_retired', message: e.serverMessage?.trim() || QUERY_RETIRED_MESSAGE, httpStatus: status, serverCode: e.serverCode };
-      }
       const code: SpiderErrorCode =
         status === 400 ? 'bad_request'
           : status === 401 || status === 403 ? 'unauthorized'

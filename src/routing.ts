@@ -30,8 +30,13 @@ import type {
   PlanTripRequest,
   PlanTripResponse,
   PlanViaLocationInput,
+  RealTimeEstimate,
+  Route as RouteWire,
   RoutingError as RoutingErrorWire,
+  Stop as StopWire,
   TransitMode as WireTransitMode,
+  Trip as TripWire,
+  TripGeometry,
   TripRequest,
   TripResponse,
   TripTimetable,
@@ -43,7 +48,7 @@ export interface LatLon {
 }
 
 export interface Leg {
-  readonly mode: TransitMode | null;
+  readonly mode: TransitMode;
   readonly startScheduled: string;
   readonly endScheduled: string;
   /** Estimated (realtime-adjusted) departure ISO time, when the feed reported one; otherwise null. */
@@ -57,11 +62,12 @@ export interface Leg {
   /** Typical delay in seconds planned onto this leg's arrival at the requested `reliability`; null when none was requested or there is no history. */
   readonly typicalArrivalDelaySeconds: number | null;
   readonly isRealtime: boolean;
-  readonly realtimeState: RealtimeState | null;
-  /** GTFS service date this leg's trip runs on (ISO `YYYY-MM-DD`) — pass to realtime `delays` lookups. */
+  readonly realtimeState: RealtimeState;
+  /** GTFS service date this leg's trip runs on (ISO `YYYY-MM-DD`) — pass to realtime `delays` lookups; null on a walk leg. */
   readonly serviceDate: string | null;
-  readonly fromName: string | null;
-  readonly toName: string | null;
+  /** The stop's name; `Origin` or `Destination` for a coordinate. */
+  readonly fromName: string;
+  readonly toName: string;
   /** Stop ids of the leg's endpoints; null for a coordinate endpoint. */
   readonly fromGtfsId: string | null;
   readonly toGtfsId: string | null;
@@ -76,9 +82,10 @@ export interface Leg {
   readonly routeColor: string | null;
   /** Route text colour as the feed gives it: GTFS hex without `#`, e.g. `FFFFFF`. */
   readonly routeTextColor: string | null;
+  /** Null on a walk leg and when the feed has none. */
   readonly headsign: string | null;
-  readonly distanceMeters: number | null;
-  readonly durationSeconds: number | null;
+  readonly distanceMeters: number;
+  readonly durationSeconds: number;
   readonly tripGtfsId: string | null;
   /** True when the rider stays on board from the previous leg as the vehicle continues as another trip; not counted as a transfer. */
   readonly interlineWithPreviousLeg: boolean;
@@ -91,10 +98,10 @@ export interface Leg {
 }
 
 export interface Itinerary {
-  readonly start: string | null;
-  readonly end: string | null;
+  readonly start: string;
+  readonly end: string;
   readonly durationSeconds: number;
-  readonly waitingTimeSeconds: number | null;
+  readonly waitingTimeSeconds: number;
   readonly numberOfTransfers: number;
   /** @deprecated Always null. */
   readonly accessibilityScore: number | null;
@@ -129,7 +136,7 @@ export interface Route {
   readonly edges: readonly RouteEdge[];
   readonly pageInfo: RoutePageInfo;
   readonly routingErrors: readonly RoutingError[];
-  readonly searchDateTime: string | null;
+  readonly searchDateTime: string;
 }
 
 /**
@@ -160,25 +167,26 @@ export type PlanStreamEvent =
 
 export interface Departure {
   readonly scheduledTimeEpochMs: number;
-  readonly realtimeTimeEpochMs: number | null;
+  /** The realtime-adjusted departure; the scheduled one when the trip has no realtime. */
+  readonly realtimeTimeEpochMs: number;
   readonly isRealtime: boolean;
-  readonly realtimeState: RealtimeState | null;
+  readonly realtimeState: RealtimeState;
   /** Typical (median) delay in seconds at this stop for this trip on its service date's day type; null when there is no history. */
   readonly typicalDelaySeconds: number | null;
   readonly headsign: string | null;
-  readonly tripGtfsId: string | null;
+  readonly tripGtfsId: string;
   /** GTFS service date the trip runs on (ISO `YYYY-MM-DD`) — pass it to {@link SpiderRouting.trip} and realtime `delays`. */
   readonly serviceDate: string;
-  readonly routeGtfsId: string | null;
+  readonly routeGtfsId: string;
   readonly routeShortName: string | null;
   readonly routeLongName: string | null;
   /** Route colour as the feed gives it: GTFS hex without `#`, e.g. `FF0000`. */
   readonly routeColor: string | null;
   /** Route text colour as the feed gives it: GTFS hex without `#`, e.g. `FFFFFF`. */
   readonly routeTextColor: string | null;
-  readonly mode: TransitMode | null;
+  readonly mode: TransitMode;
   /** The stop this departure leaves from: the board's own stop, or one of a station's platforms. */
-  readonly stopGtfsId: string | null;
+  readonly stopGtfsId: string;
   readonly platformCode: string | null;
   readonly wheelchairAccessible: WheelchairBoarding | null;
 }
@@ -186,12 +194,12 @@ export interface Departure {
 export interface TripStop {
   readonly gtfsId: string;
   readonly name: string;
-  readonly lat: number | null;
-  readonly lon: number | null;
-  readonly scheduledArrivalEpochMs: number | null;
-  readonly scheduledDepartureEpochMs: number | null;
-  readonly realtimeArrivalEpochMs: number | null;
-  readonly realtimeDepartureEpochMs: number | null;
+  readonly lat: number;
+  readonly lon: number;
+  readonly scheduledArrivalEpochMs: number;
+  readonly scheduledDepartureEpochMs: number;
+  readonly realtimeArrivalEpochMs: number;
+  readonly realtimeDepartureEpochMs: number;
   readonly isRealtime: boolean;
   /** Typical (median) delay in seconds at this stop for this trip on its service date's day type; null when there is no history. */
   readonly typicalDelaySeconds: number | null;
@@ -204,14 +212,14 @@ export interface TripDetails {
   readonly gtfsId: string;
   /** GTFS service date of this trip instance (ISO `YYYY-MM-DD`); null when the trip has no stop times on it. */
   readonly serviceDate: string | null;
-  readonly routeGtfsId: string | null;
+  readonly routeGtfsId: string;
   readonly routeShortName: string | null;
   readonly routeLongName: string | null;
   /** Route colour as the feed gives it: GTFS hex without `#`, e.g. `FF0000`. */
   readonly routeColor: string | null;
   /** Route text colour as the feed gives it: GTFS hex without `#`, e.g. `FFFFFF`. */
   readonly routeTextColor: string | null;
-  readonly mode: TransitMode | null;
+  readonly mode: TransitMode;
   readonly headsign: string | null;
   readonly directionId: string | null;
   readonly bikesAllowed: BikesAllowed | null;
@@ -483,7 +491,7 @@ export class SpiderRouting {
         startTime: options?.startTime != null ? Math.floor(toEpochMs(options.startTime) / 1000) : undefined,
         timeRange,
       };
-      const stop = (await this.transport.postJson<DeparturesResponse>(DEPARTURES_PATH, body)).stop;
+      const stop = (await this.transport.postJson<DeparturesResponse>(DEPARTURES_PATH, body)).stop as DepartureBoard | null;
       if (stop == null) {
         throw new TransportError('no_data', `routing returned no stop or station for id=${stopId}`);
       }
@@ -499,7 +507,7 @@ export class SpiderRouting {
     if (invalid != null) return failure(invalid);
     try {
       const body: TripRequest = { id: tripId, serviceDate };
-      const trip = (await this.transport.postJson<TripResponse>(TRIP_PATH, body)).trip;
+      const trip = (await this.transport.postJson<TripResponse>(TRIP_PATH, body)).trip as TripTimetable | null;
       if (trip == null) {
         throw new TransportError('no_data', `routing returned no trip for id=${tripId}`);
       }
@@ -544,7 +552,7 @@ export class SpiderRouting {
         searchWindowUsed: plan.pageInfo.searchWindowUsed ?? null,
       },
       routingErrors: plan.routingErrors.map(mapRoutingError),
-      searchDateTime: plan.searchDateTime ?? null,
+      searchDateTime: plan.searchDateTime,
     };
     return Object.assign({}, route, { [ROUTE_REQUEST]: request });
   }
@@ -646,7 +654,7 @@ export function parsePlanStreamRecord(event: string, data: string): PlanStreamEv
     case 'chunk':
       return decodeStreamRecord('chunk', data, (chunk: PlanStreamChunkEvent) => ({
         type: 'result',
-        itineraries: (chunk.results ?? []).map(mapItinerary),
+        itineraries: chunk.results.map(mapItinerary),
       }));
     case 'pageInfo':
       return decodeStreamRecord('pageInfo', data, (page: PlanStreamPageInfoEvent) => ({
@@ -654,11 +662,11 @@ export function parsePlanStreamRecord(event: string, data: string): PlanStreamEv
         pageInfo: {
           startCursor: page.startCursor ?? null,
           endCursor: page.endCursor ?? null,
-          hasNextPage: page.hasNextPage ?? false,
-          hasPreviousPage: page.hasPreviousPage ?? false,
+          hasNextPage: page.hasNextPage,
+          hasPreviousPage: page.hasPreviousPage,
           searchWindowUsed: page.searchWindowUsed ?? null,
         },
-        routingErrors: (page.routingErrors ?? []).map(mapRoutingError),
+        routingErrors: page.routingErrors.map(mapRoutingError),
       }));
     default:
       return null;
@@ -700,15 +708,19 @@ async function drainText(response: Response): Promise<string> {
 }
 
 function mapRoutingError(re: RoutingErrorWire): RoutingError {
-  return { code: routingErrorCodeFromWire(re.code), description: re.description, inputField: inputFieldFromWire(re.inputField) };
+  return {
+    code: routingErrorCodeFromWire(re.code),
+    description: re.description,
+    inputField: inputFieldFromWire(re.inputField as string | null),
+  };
 }
 
 function mapItinerary(node: ItineraryWire): Itinerary {
   return {
-    start: node.start ?? null,
-    end: node.end ?? null,
-    durationSeconds: node.duration ?? 0,
-    waitingTimeSeconds: node.waitingTime ?? null,
+    start: node.start,
+    end: node.end,
+    durationSeconds: node.duration,
+    waitingTimeSeconds: node.waitingTime,
     numberOfTransfers: node.numberOfTransfers,
     accessibilityScore: null,
     legs: node.legs.map(mapLeg),
@@ -716,103 +728,101 @@ function mapItinerary(node: ItineraryWire): Itinerary {
 }
 
 function mapLeg(leg: LegWire): Leg {
+  const startEstimated = leg.start.estimated as RealTimeEstimate | null;
+  const endEstimated = leg.end.estimated as RealTimeEstimate | null;
+  const fromStop = leg.from.stop as StopWire | null;
+  const toStop = leg.to.stop as StopWire | null;
+  const route = leg.route as RouteWire | null;
+  const trip = leg.trip as TripWire | null;
   return {
     mode: transitModeFromWire(leg.mode),
     startScheduled: leg.start.scheduledTime,
     endScheduled: leg.end.scheduledTime,
-    startEstimated: leg.start.estimated?.time ?? null,
-    endEstimated: leg.end.estimated?.time ?? null,
-    startDelaySeconds: durationSecondsFromWire(leg.start.estimated?.delay),
-    endDelaySeconds: durationSecondsFromWire(leg.end.estimated?.delay),
+    startEstimated: startEstimated?.time ?? null,
+    endEstimated: endEstimated?.time ?? null,
+    startDelaySeconds: durationSecondsFromWire(startEstimated?.delay),
+    endDelaySeconds: durationSecondsFromWire(endEstimated?.delay),
     typicalArrivalDelaySeconds: leg.typicalArrivalDelay ?? null,
-    isRealtime: leg.realTime ?? false,
+    isRealtime: leg.realTime,
     realtimeState: realtimeStateFromWire(leg.realtimeState),
     serviceDate: leg.serviceDate ?? null,
-    fromName: leg.from.name ?? null,
-    toName: leg.to.name ?? null,
-    fromGtfsId: leg.from.stop?.gtfsId ?? null,
-    toGtfsId: leg.to.stop?.gtfsId ?? null,
-    fromPlatformCode: leg.from.stop?.platformCode ?? null,
-    toPlatformCode: leg.to.stop?.platformCode ?? null,
-    fromZoneId: leg.from.stop?.zoneId ?? null,
-    toZoneId: leg.to.stop?.zoneId ?? null,
-    routeGtfsId: leg.route?.gtfsId ?? null,
-    routeShortName: leg.route?.shortName ?? null,
-    routeLongName: leg.route?.longName ?? null,
-    routeColor: leg.route?.color ?? null,
-    routeTextColor: leg.route?.textColor ?? null,
+    fromName: leg.from.name,
+    toName: leg.to.name,
+    fromGtfsId: fromStop?.gtfsId ?? null,
+    toGtfsId: toStop?.gtfsId ?? null,
+    fromPlatformCode: fromStop?.platformCode ?? null,
+    toPlatformCode: toStop?.platformCode ?? null,
+    fromZoneId: fromStop?.zoneId ?? null,
+    toZoneId: toStop?.zoneId ?? null,
+    routeGtfsId: route?.gtfsId ?? null,
+    routeShortName: route?.shortName ?? null,
+    routeLongName: route?.longName ?? null,
+    routeColor: route?.color ?? null,
+    routeTextColor: route?.textColor ?? null,
     headsign: leg.headsign ?? null,
-    distanceMeters: leg.distance ?? null,
-    durationSeconds: leg.duration ?? null,
-    tripGtfsId: leg.trip?.gtfsId ?? null,
-    interlineWithPreviousLeg: leg.interlineWithPreviousLeg ?? false,
-    bikesAllowed: bikesAllowedFromWire(leg.trip?.bikesAllowed),
+    distanceMeters: leg.distance,
+    durationSeconds: leg.duration,
+    tripGtfsId: trip?.gtfsId ?? null,
+    interlineWithPreviousLeg: leg.interlineWithPreviousLeg,
+    bikesAllowed: bikesAllowedFromWire(trip?.bikesAllowed),
     accessibilityScore: null,
-    fromWheelchair: wheelchairFromWire(leg.from.stop?.wheelchairBoarding),
-    toWheelchair: wheelchairFromWire(leg.to.stop?.wheelchairBoarding),
-    geometry: leg.legGeometry?.points ? decodePolyline(leg.legGeometry.points) : [],
+    fromWheelchair: wheelchairFromWire(fromStop?.wheelchairBoarding),
+    toWheelchair: wheelchairFromWire(toStop?.wheelchairBoarding),
+    geometry: decodePolyline(leg.legGeometry.points),
   };
 }
 
 function mapDepartures(stop: DepartureBoard): Departure[] {
-  const out: Departure[] = [];
-  for (const st of stop.stoptimesWithoutPatterns ?? []) {
-    const serviceDay = st.serviceDay;
-    const scheduledOffset = st.scheduledDeparture;
-    if (serviceDay == null || scheduledOffset == null) continue;
-    const route = st.trip?.route;
-    out.push({
-      scheduledTimeEpochMs: (serviceDay + scheduledOffset) * 1000,
-      realtimeTimeEpochMs: st.realtimeDeparture != null ? (serviceDay + st.realtimeDeparture) * 1000 : null,
-      isRealtime: st.realtime ?? false,
+  return stop.stoptimesWithoutPatterns.map((st) => {
+    const route = st.trip.route;
+    return {
+      scheduledTimeEpochMs: (st.serviceDay + st.scheduledDeparture) * 1000,
+      realtimeTimeEpochMs: (st.serviceDay + st.realtimeDeparture) * 1000,
+      isRealtime: st.realtime,
       realtimeState: realtimeStateFromWire(st.realtimeState),
       typicalDelaySeconds: st.typicalDelay ?? null,
       headsign: st.headsign ?? null,
-      tripGtfsId: st.trip?.gtfsId ?? null,
-      serviceDate: serviceDateOf(serviceDay),
-      routeGtfsId: route?.gtfsId ?? null,
-      routeShortName: route?.shortName ?? null,
-      routeLongName: route?.longName ?? null,
-      routeColor: route?.color ?? null,
-      routeTextColor: route?.textColor ?? null,
-      mode: transitModeFromWire(route?.mode),
-      stopGtfsId: st.stop?.gtfsId ?? null,
-      platformCode: st.stop?.platformCode ?? null,
-      wheelchairAccessible: wheelchairFromWire(st.trip?.wheelchairAccessible),
-    });
-  }
-  return out;
+      tripGtfsId: st.trip.gtfsId,
+      serviceDate: serviceDateOf(st.serviceDay),
+      routeGtfsId: route.gtfsId,
+      routeShortName: route.shortName ?? null,
+      routeLongName: route.longName ?? null,
+      routeColor: route.color ?? null,
+      routeTextColor: route.textColor ?? null,
+      mode: transitModeFromWire(route.mode),
+      stopGtfsId: st.stop.gtfsId,
+      platformCode: st.stop.platformCode ?? null,
+      wheelchairAccessible: wheelchairFromWire(st.trip.wheelchairAccessible),
+    };
+  });
 }
 
 function mapTrip(trip: TripTimetable): TripDetails {
-  const serviceDay = trip.stoptimesForDate?.find((st) => st.serviceDay != null)?.serviceDay;
-  const stops: TripStop[] = [];
-  for (const st of trip.stoptimesForDate ?? []) {
+  const first = trip.stoptimesForDate[0];
+  const geometry = trip.tripGeometry as TripGeometry | null;
+  const stops: TripStop[] = trip.stoptimesForDate.map((st) => {
     const s = st.stop;
-    if (s == null) continue;
-    const day = st.serviceDay;
-    const at = (offset: number | null | undefined): number | null =>
-      offset != null && day != null ? (day + offset) * 1000 : null;
-    stops.push({
+    const at = (offset: number): number => (st.serviceDay + offset) * 1000;
+    return {
       gtfsId: s.gtfsId,
       name: s.name,
-      lat: s.lat ?? null,
-      lon: s.lon ?? null,
+      lat: s.lat,
+      lon: s.lon,
       scheduledArrivalEpochMs: at(st.scheduledArrival),
       scheduledDepartureEpochMs: at(st.scheduledDeparture),
       realtimeArrivalEpochMs: at(st.realtimeArrival),
       realtimeDepartureEpochMs: at(st.realtimeDeparture),
-      isRealtime: st.realtime ?? false,
+      isRealtime: st.realtime,
       typicalDelaySeconds: st.typicalDelay ?? null,
       wheelchairBoarding: wheelchairFromWire(s.wheelchairBoarding),
       platformCode: s.platformCode ?? null,
       zoneId: s.zoneId ?? null,
-    });
-  }
+    };
+  });
   return {
     gtfsId: trip.gtfsId,
-    serviceDate: serviceDay != null ? serviceDateOf(serviceDay) : null,
-    routeGtfsId: trip.route.gtfsId ?? null,
+    serviceDate: first != null ? serviceDateOf(first.serviceDay) : null,
+    routeGtfsId: trip.route.gtfsId,
     routeShortName: trip.route.shortName ?? null,
     routeLongName: trip.route.longName ?? null,
     routeColor: trip.route.color ?? null,
@@ -823,6 +833,6 @@ function mapTrip(trip: TripTimetable): TripDetails {
     bikesAllowed: bikesAllowedFromWire(trip.bikesAllowed),
     wheelchairAccessible: wheelchairFromWire(trip.wheelchairAccessible),
     stops,
-    geometry: trip.tripGeometry?.points ? decodePolyline(trip.tripGeometry.points) : [],
+    geometry: geometry != null ? decodePolyline(geometry.points) : [],
   };
 }
