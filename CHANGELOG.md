@@ -1,5 +1,30 @@
 # Changelog
 
+## 1.3.0 — 2026-10-07
+
+Targets Spider API contract 1.3, a conformance release. SDKs up to 1.2 do not work against contract 1.3: realtime
+delays moved to `GET`.
+
+### Breaking
+
+- **`realtime.delays(serviceDate, tripIds)`** takes one service date and calls `GET /realtime/v1/delays`. The
+  grouped `delays(byServiceDate)` and `delays(tripIds, serviceDate)` forms are gone; call once per date.
+  `pollDelays(realtime, serviceDate, tripIds, options?)` follows.
+- **`TripDelays` is flat:** `{ serviceDate, delays, missing, freshness }`. `ServiceDateDelays` and `delayFor`
+  are removed.
+- **`delays` checks its ids before any request.** Duplicates are dropped and the rest sorted, so equal requests
+  share one URL and cache entry. No ids is `tripIds is required` (was a skipped call), a blank id
+  `tripIds is invalid`, more than 50 distinct ids `tripIds is out of range`.
+- **Realtime ids are feed-prefixed** (`<feedId>:<id>`), exactly as routing returns them, and sent untouched.
+- **`'query_retired'` is removed** from `SpiderErrorCode`; a 410 is `unknown`.
+- **`RoutingErrorCode` drops `NO_TRANSIT_CONNECTION_IN_SEARCH_WINDOW` and `OUTSIDE_BOUNDS`.**
+- **Types follow the contract's exact nullability.** Now non-null: `Itinerary.start`, `end`,
+  `waitingTimeSeconds`; `Leg.mode`, `realtimeState`, `fromName`, `toName`, `distanceMeters`, `durationSeconds`;
+  `Route.searchDateTime`; `Departure.realtimeTimeEpochMs`, `realtimeState`, `tripGtfsId`, `routeGtfsId`, `mode`,
+  `stopGtfsId`; `TripStop.lat`, `lon` and its four time fields; `TripDetails.routeGtfsId`, `mode`; `Stop.lat`,
+  `lon`; `LiveVehicle.tripId`, `latitude`, `longitude`; `TripDelay.tripId`; `ServiceAlert.id`.
+- Leg and itinerary durations are whole seconds. `Itinerary.durationSeconds` no longer falls back to 0.
+
 ## 1.2.0 — 2026-10-06
 
 Targets Spider API contract 1.2. Routing moves from persisted GraphQL queries to plain REST operations, and every
