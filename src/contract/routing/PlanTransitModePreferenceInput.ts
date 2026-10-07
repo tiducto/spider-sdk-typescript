@@ -4,5 +4,5 @@ import type { TransitModePreferenceCostInput } from './TransitModePreferenceCost
 /** A transit mode the search may use. */
 export interface PlanTransitModePreferenceInput {
   mode: TransitMode;
-  cost?: TransitModePreferenceCostInput;
+  cost?: TransitModePreferenceCostInput | unknown;
 }

@@ -2,8 +2,8 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Tiducto Transit API — Realtime",
-    "version": "1.2",
-    "description": "GTFS-RT live data (vehicles, delays, alerts) — a plain-REST customer surface (poll-based, key-auth). Companion to routing and stops; the three share one pack version. Deliberately poll-only (cacheable, high-fanout) — no streaming/subscription surface, so it is OpenAPI, not AsyncAPI. Enum-ish fields are bare strings so unrecognized producer values pass through unchanged. Every id in a response is feed-prefixed (`<feedId>:<id>`), the same form routing's `gtfsId` and stop search return. Id inputs accept the prefixed form or the raw GTFS id."
+    "version": "1.3",
+    "description": "GTFS-RT live data (vehicles, delays, alerts), poll-based and key-authenticated. Companion to routing and stops; the three share one pack version. A member that has no value is absent, never null. A GTFS-RT enum value the decoder doesn't recognise is omitted. Every id in a response is feed-prefixed (`<feedId>:<id>`), exactly as routing's `gtfsId` and stop search return it, and an id in a request is used exactly as sent: a raw id, or one with another feed's prefix, is unknown. A query parameter not listed is a 400 `<name> is not allowed`, and a repeated one a 400 `<name> is invalid`. A method an operation doesn't take is a 405 `method_not_allowed`, `POST /realtime/v1/delays` included, and a path under `/realtime/v1/` that matches no operation is a 404 `not_found`. A response may come from a shared cache keyed by host, URL and `apikey`; such a response is not metered. Any other path that matches no operation, and every path of an environment without a realtime deployment, is the gateway's plain-text `404 Not Found`, outside every operation."
   },
   "servers": [
     {
@@ -25,13 +25,14 @@
     "/realtime/v1/vehicles": {
       "get": {
         "summary": "Realtime Vehicles",
-        "description": "Live vehicle positions for the given trips. `tripIds` is required: 1 to 50 comma-separated trip ids per request. None, or more than 50, is an HTTP 400 naming `tripIds`.",
+        "description": "Live vehicle positions for the given trips, at most one per trip.\n- `tripIds` is required: 1 to 50 comma-separated trip ids, each used exactly as sent and counted as sent. Absent or empty is a 400 `tripIds is required`, a blank entry (as in `1:39822,` or a space) a 400 `tripIds is invalid`, more than 50 a 400 `tripIds is out of range`.\n- Ids are feed-prefixed (`<feedId>:<id>`), exactly as routing returns them; a raw id or another feed's id is unknown and listed in `missing`.\n- A query parameter not listed is a 400 `<name> is not allowed`, and a repeated one a 400 `<name> is invalid`.\n- The response carries `ETag`, `Cache-Control: public, max-age=<poll interval>, must-revalidate` and `Vary: apikey`; a request whose `If-None-Match` matches the `ETag` is a 304 without a body.",
         "operationId": "realtime_vehicles",
         "x-surface": "realtime",
         "parameters": [
           {
             "name": "tripIds",
             "in": "query",
+            "description": "1 to 50 comma-separated feed-prefixed trip ids (`<feedId>:<id>`), each used exactly as sent (never trimmed) and counted as sent. Absent or empty is a 400 `tripIds is required`, a blank entry (as in `1:39822,` or a space) `tripIds is invalid`, and more than 50 ids `tripIds is out of range`.",
             "required": true,
             "schema": {
               "type": "string"
@@ -40,20 +41,93 @@
         ],
         "responses": {
           "200": {
-            "description": "Positions found, plus any missing trip ids and feed freshness.",
+            "description": "Positions found, plus feed freshness; a requested id with no live vehicle, an unknown one included, is listed in `missing`.",
+            "headers": {
+              "ETag": {
+                "description": "The snapshot's entity tag; absent until the feed has reported.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Cache-Control": {
+                "description": "`public, max-age=<the feed's poll interval in seconds>, must-revalidate`; `public, max-age=5` until the feed has reported.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Vary": {
+                "description": "`apikey`: a shared cache keys the response by host, URL and `apikey`.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
             "content": {
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/VehiclesResponse"
+                },
+                "example": {
+                  "vehicles": [
+                    {
+                      "tripId": "1:39822",
+                      "routeId": "1:L41D99",
+                      "vehicleId": "1:7103",
+                      "label": "7103",
+                      "latitude": 49.223512,
+                      "longitude": 16.578233,
+                      "bearing": 352.0,
+                      "speed": 6.4,
+                      "stopId": "1:U1660Z3",
+                      "currentStatus": "INCOMING_AT",
+                      "occupancyStatus": "MANY_SEATS_AVAILABLE",
+                      "timestamp": 1790056795
+                    }
+                  ],
+                  "missing": [
+                    "1:39823"
+                  ],
+                  "feedTimestamp": 1790056800,
+                  "staleSeconds": 4
+                }
+              }
+            }
+          },
+          "304": {
+            "description": "The snapshot is unchanged: `If-None-Match` matches the current `ETag` under RFC 9110 weak comparison (`W/` tags, lists and `*` included). No body; `ETag`, `Cache-Control` and `Vary` as on a 200.",
+            "headers": {
+              "ETag": {
+                "description": "The snapshot's entity tag; absent until the feed has reported.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Cache-Control": {
+                "description": "`public, max-age=<the feed's poll interval in seconds>, must-revalidate`; `public, max-age=5` until the feed has reported.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Vary": {
+                "description": "`apikey`: a shared cache keys the response by host, URL and `apikey`.",
+                "schema": {
+                  "type": "string"
                 }
               }
             }
           },
           "400": {
-            "description": "Missing or out-of-range `tripIds`; the error names the field."
+            "description": "`tripIds` absent or empty is `tripIds is required`, a blank entry `tripIds is invalid`, and more than 50 ids `tripIds is out of range`. A query parameter not listed is `<name> is not allowed`, and a repeated one `<name> is invalid`; `field` names it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
           },
           "401": {
-            "description": "Missing or invalid apikey.",
+            "description": "The `apikey` header is missing (`key_missing`) or holds no valid key (`key_invalid`).",
             "content": {
               "application/json": {
                 "schema": {
@@ -63,7 +137,7 @@
             }
           },
           "403": {
-            "description": "Forbidden — the key is not permitted for this operation.",
+            "description": "The key is not allowed on this operation (`key_not_allowed`), or the agreement it belongs to is inactive (`agreement_inactive`).",
             "content": {
               "application/json": {
                 "schema": {
@@ -73,7 +147,37 @@
             }
           },
           "429": {
-            "description": "Rate limit exceeded.",
+            "description": "The key's rate limit is reached (`rate_limited`).",
+            "headers": {
+              "Retry-After": {
+                "description": "Seconds until a request is admitted again.",
+                "schema": {
+                  "type": "integer"
+                }
+              },
+              "X-RateLimit-Limit": {
+                "description": "Requests the key may make per rate-limit window.",
+                "schema": {
+                  "type": "integer"
+                }
+              },
+              "X-RateLimit-Reset": {
+                "description": "Unix seconds at which the rate-limit window resets.",
+                "schema": {
+                  "type": "integer"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "description": "Another client error: 404 `not_found`, 405 `method_not_allowed`, 411 `length_required` (a body without a length) or 413 `payload_too_large`.",
             "content": {
               "application/json": {
                 "schema": {
@@ -83,7 +187,7 @@
             }
           },
           "5XX": {
-            "description": "Server error.",
+            "description": "From Spider, an ErrorResponse: `internal_error`, `upstream_unavailable` or `upstream_timeout`. A network intermediary in front of Spider may answer a 5XX with a body that is not JSON.",
             "content": {
               "application/json": {
                 "schema": {
@@ -98,13 +202,14 @@
     "/realtime/v1/vehicles/by-trip/{id}": {
       "get": {
         "summary": "Realtime Vehicle By Trip",
-        "description": "Live vehicle for a single trip. Always 200 with a freshness envelope; `vehicle` is absent when none is currently reporting (a normal state, never 404).",
+        "description": "Live vehicle for a single trip. Always 200 with a freshness envelope; `vehicle` is absent when none is currently reporting, a normal state, never a 404.\n- Ids are feed-prefixed (`<feedId>:<id>`), exactly as routing returns them; a raw id or another feed's id is unknown: `vehicle` is absent for it.\n- A query parameter is a 400 `<name> is not allowed`.\n- The response carries `ETag`, `Cache-Control: public, max-age=<poll interval>, must-revalidate` and `Vary: apikey`; a request whose `If-None-Match` matches the `ETag` is a 304 without a body.",
         "operationId": "realtime_vehicle_by_trip",
         "x-surface": "realtime",
         "parameters": [
           {
             "name": "id",
             "in": "path",
+            "description": "Feed-prefixed trip id (`<feedId>:<id>`), used exactly as sent.",
             "required": true,
             "schema": {
               "type": "string"
@@ -113,17 +218,88 @@
         ],
         "responses": {
           "200": {
-            "description": "Feed freshness plus the live vehicle, when one is reporting; `vehicle` is absent for a trip with none (a normal state, not an error).",
+            "description": "Feed freshness plus the live vehicle, when one is reporting; `vehicle` is absent for a trip with none or an unknown id, a normal state rather than an error.",
+            "headers": {
+              "ETag": {
+                "description": "The snapshot's entity tag; absent until the feed has reported.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Cache-Control": {
+                "description": "`public, max-age=<the feed's poll interval in seconds>, must-revalidate`; `public, max-age=5` until the feed has reported.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Vary": {
+                "description": "`apikey`: a shared cache keys the response by host, URL and `apikey`.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
             "content": {
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/VehicleByTripResponse"
+                },
+                "example": {
+                  "vehicle": {
+                    "tripId": "1:39822",
+                    "routeId": "1:L41D99",
+                    "vehicleId": "1:7103",
+                    "label": "7103",
+                    "latitude": 49.223512,
+                    "longitude": 16.578233,
+                    "bearing": 352.0,
+                    "speed": 6.4,
+                    "stopId": "1:U1660Z3",
+                    "currentStatus": "INCOMING_AT",
+                    "occupancyStatus": "MANY_SEATS_AVAILABLE",
+                    "timestamp": 1790056795
+                  },
+                  "feedTimestamp": 1790056800,
+                  "staleSeconds": 4
+                }
+              }
+            }
+          },
+          "304": {
+            "description": "The snapshot is unchanged: `If-None-Match` matches the current `ETag` under RFC 9110 weak comparison (`W/` tags, lists and `*` included). No body; `ETag`, `Cache-Control` and `Vary` as on a 200.",
+            "headers": {
+              "ETag": {
+                "description": "The snapshot's entity tag; absent until the feed has reported.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Cache-Control": {
+                "description": "`public, max-age=<the feed's poll interval in seconds>, must-revalidate`; `public, max-age=5` until the feed has reported.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Vary": {
+                "description": "`apikey`: a shared cache keys the response by host, URL and `apikey`.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "A query parameter not listed is `<name> is not allowed`, and a repeated one `<name> is invalid`; `field` names it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
                 }
               }
             }
           },
           "401": {
-            "description": "Missing or invalid apikey.",
+            "description": "The `apikey` header is missing (`key_missing`) or holds no valid key (`key_invalid`).",
             "content": {
               "application/json": {
                 "schema": {
@@ -133,7 +309,7 @@
             }
           },
           "403": {
-            "description": "Forbidden — the key is not permitted for this operation.",
+            "description": "The key is not allowed on this operation (`key_not_allowed`), or the agreement it belongs to is inactive (`agreement_inactive`).",
             "content": {
               "application/json": {
                 "schema": {
@@ -143,7 +319,37 @@
             }
           },
           "429": {
-            "description": "Rate limit exceeded.",
+            "description": "The key's rate limit is reached (`rate_limited`).",
+            "headers": {
+              "Retry-After": {
+                "description": "Seconds until a request is admitted again.",
+                "schema": {
+                  "type": "integer"
+                }
+              },
+              "X-RateLimit-Limit": {
+                "description": "Requests the key may make per rate-limit window.",
+                "schema": {
+                  "type": "integer"
+                }
+              },
+              "X-RateLimit-Reset": {
+                "description": "Unix seconds at which the rate-limit window resets.",
+                "schema": {
+                  "type": "integer"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "description": "Another client error: 404 `not_found`, 405 `method_not_allowed`, 411 `length_required` (a body without a length) or 413 `payload_too_large`.",
             "content": {
               "application/json": {
                 "schema": {
@@ -153,7 +359,7 @@
             }
           },
           "5XX": {
-            "description": "Server error.",
+            "description": "From Spider, an ErrorResponse: `internal_error`, `upstream_unavailable` or `upstream_timeout`. A network intermediary in front of Spider may answer a 5XX with a body that is not JSON.",
             "content": {
               "application/json": {
                 "schema": {
@@ -166,48 +372,129 @@
       }
     },
     "/realtime/v1/delays": {
-      "post": {
+      "get": {
         "summary": "Realtime Delays",
-        "description": "Live schedule deviation, resolved per trip instance (trip_id + service date).\nGroup the trip ids you want by the GTFS serviceDate — ISO-8601 YYYY-MM-DD, the\nsame value a plan leg's, departure's or trip's serviceDate carries — take it\nfrom there, never from the departure clock time (GTFS times may exceed 24:00).\nA trip instance the feed doesn't hold comes back in that group's `missing`,\nnot painted with another day's delay.",
+        "description": "Live schedule deviation for trips on one service date, resolved per trip instance (trip id + service date).\n- `serviceDate` is the GTFS service date, ISO-8601 `YYYY-MM-DD`: the same value a plan leg's, departure's or trip's `serviceDate` carries. GTFS times may exceed 24:00, so a service date can differ from the departure's calendar date.\n- `serviceDate` and `tripIds` are required; absent or empty is a 400 `<name> is required`.\n- `tripIds` is 1 to 50 comma-separated trip ids, each used exactly as sent and counted as sent. A blank entry (as in `1:39822,` or a space) is a 400 `tripIds is invalid`, more than 50 a 400 `tripIds is out of range`.\n- Ids are feed-prefixed (`<feedId>:<id>`), exactly as routing returns them; a raw id or another feed's id is unknown and listed in `missing`.\n- A query parameter not listed is a 400 `<name> is not allowed`, and a repeated one a 400 `<name> is invalid`. Another method, `POST` included, is a 405 `method_not_allowed`.\n- A trip instance the feed doesn't hold for that service date comes back in `missing`, never painted with another day's delay.\n- The response carries `ETag`, `Cache-Control: public, max-age=<poll interval>, must-revalidate` and `Vary: apikey`; a request whose `If-None-Match` matches the `ETag` is a 304 without a body.",
         "operationId": "realtime_delays",
         "x-surface": "realtime",
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/DelaysRequest"
-              },
-              "example": {
-                "queries": [
-                  {
-                    "serviceDate": "2026-09-22",
-                    "tripIds": [
-                      "1:39822",
-                      "1:39823"
-                    ]
-                  }
-                ]
-              }
+        "parameters": [
+          {
+            "name": "serviceDate",
+            "in": "query",
+            "description": "GTFS service date, ISO-8601 `YYYY-MM-DD`: the same value a plan leg's, departure's or trip's `serviceDate` carries. Absent or empty is a 400 `serviceDate is required`, and a value that is not an ISO date `serviceDate is invalid`.",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "date"
+            }
+          },
+          {
+            "name": "tripIds",
+            "in": "query",
+            "description": "1 to 50 comma-separated feed-prefixed trip ids (`<feedId>:<id>`), each used exactly as sent (never trimmed) and counted as sent. Absent or empty is a 400 `tripIds is required`, a blank entry (as in `1:39822,` or a space) `tripIds is invalid`, and more than 50 ids `tripIds is out of range`.",
+            "required": true,
+            "schema": {
+              "type": "string"
             }
           }
-        },
+        ],
         "responses": {
           "200": {
-            "description": "Delays grouped by service date, each with its missing trip ids, plus global feed freshness.",
+            "description": "Delays for the requested service date, plus feed freshness; a requested id with no live delay, an unknown one included, is listed in `missing`.",
+            "headers": {
+              "ETag": {
+                "description": "The snapshot's entity tag; absent until the feed has reported.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Cache-Control": {
+                "description": "`public, max-age=<the feed's poll interval in seconds>, must-revalidate`; `public, max-age=5` until the feed has reported.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Vary": {
+                "description": "`apikey`: a shared cache keys the response by host, URL and `apikey`.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
             "content": {
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/DelaysResponse"
+                },
+                "example": {
+                  "serviceDate": "2026-09-22",
+                  "delays": [
+                    {
+                      "tripId": "1:39822",
+                      "routeId": "1:L41D99",
+                      "delaySeconds": 120,
+                      "scheduleRelationship": "SCHEDULED",
+                      "stopTimeUpdates": [
+                        {
+                          "stopId": "1:U1155Z1",
+                          "stopSequence": 5,
+                          "arrivalDelay": 60,
+                          "departureDelay": 90,
+                          "scheduleRelationship": "SCHEDULED"
+                        },
+                        {
+                          "stopId": "1:U1660Z3",
+                          "stopSequence": 6,
+                          "arrivalDelay": 120,
+                          "scheduleRelationship": "SCHEDULED"
+                        }
+                      ]
+                    }
+                  ],
+                  "missing": [
+                    "1:39823"
+                  ],
+                  "feedTimestamp": 1790056800,
+                  "staleSeconds": 4
+                }
+              }
+            }
+          },
+          "304": {
+            "description": "The snapshot is unchanged: `If-None-Match` matches the current `ETag` under RFC 9110 weak comparison (`W/` tags, lists and `*` included). No body; `ETag`, `Cache-Control` and `Vary` as on a 200.",
+            "headers": {
+              "ETag": {
+                "description": "The snapshot's entity tag; absent until the feed has reported.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Cache-Control": {
+                "description": "`public, max-age=<the feed's poll interval in seconds>, must-revalidate`; `public, max-age=5` until the feed has reported.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Vary": {
+                "description": "`apikey`: a shared cache keys the response by host, URL and `apikey`.",
+                "schema": {
+                  "type": "string"
                 }
               }
             }
           },
           "400": {
-            "description": "Missing or out-of-range `tripIds`, or a missing or non-ISO `serviceDate`; the error names the field."
+            "description": "`serviceDate` absent or empty is `serviceDate is required`, and not an ISO date `serviceDate is invalid`. `tripIds` absent or empty is `tripIds is required`, a blank entry `tripIds is invalid`, and more than 50 ids `tripIds is out of range`. A query parameter not listed is `<name> is not allowed`, and a repeated one `<name> is invalid`; `field` names it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
           },
           "401": {
-            "description": "Missing or invalid apikey.",
+            "description": "The `apikey` header is missing (`key_missing`) or holds no valid key (`key_invalid`).",
             "content": {
               "application/json": {
                 "schema": {
@@ -217,7 +504,7 @@
             }
           },
           "403": {
-            "description": "Forbidden — the key is not permitted for this operation.",
+            "description": "The key is not allowed on this operation (`key_not_allowed`), or the agreement it belongs to is inactive (`agreement_inactive`).",
             "content": {
               "application/json": {
                 "schema": {
@@ -227,7 +514,37 @@
             }
           },
           "429": {
-            "description": "Rate limit exceeded.",
+            "description": "The key's rate limit is reached (`rate_limited`).",
+            "headers": {
+              "Retry-After": {
+                "description": "Seconds until a request is admitted again.",
+                "schema": {
+                  "type": "integer"
+                }
+              },
+              "X-RateLimit-Limit": {
+                "description": "Requests the key may make per rate-limit window.",
+                "schema": {
+                  "type": "integer"
+                }
+              },
+              "X-RateLimit-Reset": {
+                "description": "Unix seconds at which the rate-limit window resets.",
+                "schema": {
+                  "type": "integer"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "description": "Another client error: 404 `not_found`, 405 `method_not_allowed`, 411 `length_required` (a body without a length) or 413 `payload_too_large`.",
             "content": {
               "application/json": {
                 "schema": {
@@ -237,7 +554,7 @@
             }
           },
           "5XX": {
-            "description": "Server error.",
+            "description": "From Spider, an ErrorResponse: `internal_error`, `upstream_unavailable` or `upstream_timeout`. A network intermediary in front of Spider may answer a 5XX with a body that is not JSON.",
             "content": {
               "application/json": {
                 "schema": {
@@ -252,22 +569,103 @@
     "/realtime/v1/alerts": {
       "get": {
         "summary": "Realtime Alerts",
-        "description": "All active service alerts for the environment.",
+        "description": "The service alerts active now across the environment's feeds: inside any of their active periods, or always for an alert without one.\n- A query parameter is a 400 `<name> is not allowed`.\n- The response carries `ETag`, `Cache-Control: public, max-age=<poll interval>, must-revalidate` and `Vary: apikey`; a request whose `If-None-Match` matches the `ETag` is a 304 without a body.",
         "operationId": "realtime_alerts",
         "x-surface": "realtime",
         "responses": {
           "200": {
-            "description": "Active alerts plus feed freshness.",
+            "description": "The alerts active now, plus feed freshness.",
+            "headers": {
+              "ETag": {
+                "description": "The snapshot's entity tag; absent until the feed has reported.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Cache-Control": {
+                "description": "`public, max-age=<the feed's poll interval in seconds>, must-revalidate`; `public, max-age=5` until the feed has reported.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Vary": {
+                "description": "`apikey`: a shared cache keys the response by host, URL and `apikey`.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
             "content": {
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/AlertsResponse"
+                },
+                "example": {
+                  "alerts": [
+                    {
+                      "id": "1:4417",
+                      "cause": "CONSTRUCTION",
+                      "effect": "DETOUR",
+                      "severityLevel": "WARNING",
+                      "headerText": "Line 41 diverted near Technická",
+                      "descriptionText": "Line 41 skips Horská during track works; the nearest stop is Technická.",
+                      "activePeriods": [
+                        {
+                          "start": 1790035200,
+                          "end": 1790121599
+                        }
+                      ],
+                      "informedEntities": [
+                        {
+                          "routeId": "1:L41D99"
+                        },
+                        {
+                          "stopId": "1:U1155Z1"
+                        }
+                      ]
+                    }
+                  ],
+                  "feedTimestamp": 1790056800,
+                  "staleSeconds": 4
+                }
+              }
+            }
+          },
+          "304": {
+            "description": "The snapshot is unchanged: `If-None-Match` matches the current `ETag` under RFC 9110 weak comparison (`W/` tags, lists and `*` included). No body; `ETag`, `Cache-Control` and `Vary` as on a 200.",
+            "headers": {
+              "ETag": {
+                "description": "The snapshot's entity tag; absent until the feed has reported.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Cache-Control": {
+                "description": "`public, max-age=<the feed's poll interval in seconds>, must-revalidate`; `public, max-age=5` until the feed has reported.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Vary": {
+                "description": "`apikey`: a shared cache keys the response by host, URL and `apikey`.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "A query parameter not listed is `<name> is not allowed`, and a repeated one `<name> is invalid`; `field` names it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
                 }
               }
             }
           },
           "401": {
-            "description": "Missing or invalid apikey.",
+            "description": "The `apikey` header is missing (`key_missing`) or holds no valid key (`key_invalid`).",
             "content": {
               "application/json": {
                 "schema": {
@@ -277,7 +675,7 @@
             }
           },
           "403": {
-            "description": "Forbidden — the key is not permitted for this operation.",
+            "description": "The key is not allowed on this operation (`key_not_allowed`), or the agreement it belongs to is inactive (`agreement_inactive`).",
             "content": {
               "application/json": {
                 "schema": {
@@ -287,7 +685,37 @@
             }
           },
           "429": {
-            "description": "Rate limit exceeded.",
+            "description": "The key's rate limit is reached (`rate_limited`).",
+            "headers": {
+              "Retry-After": {
+                "description": "Seconds until a request is admitted again.",
+                "schema": {
+                  "type": "integer"
+                }
+              },
+              "X-RateLimit-Limit": {
+                "description": "Requests the key may make per rate-limit window.",
+                "schema": {
+                  "type": "integer"
+                }
+              },
+              "X-RateLimit-Reset": {
+                "description": "Unix seconds at which the rate-limit window resets.",
+                "schema": {
+                  "type": "integer"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "description": "Another client error: 404 `not_found`, 405 `method_not_allowed`, 411 `length_required` (a body without a length) or 413 `payload_too_large`.",
             "content": {
               "application/json": {
                 "schema": {
@@ -297,7 +725,7 @@
             }
           },
           "5XX": {
-            "description": "Server error.",
+            "description": "From Spider, an ErrorResponse: `internal_error`, `upstream_unavailable` or `upstream_timeout`. A network intermediary in front of Spider may answer a 5XX with a body that is not JSON.",
             "content": {
               "application/json": {
                 "schema": {
@@ -331,7 +759,7 @@
           },
           "missing": {
             "type": "array",
-            "description": "Requested trip ids with no live vehicle, feed-prefixed even when sent raw.",
+            "description": "Requested trip ids with no live vehicle, exactly as sent.",
             "items": {
               "type": "string"
             }
@@ -339,33 +767,41 @@
           "feedTimestamp": {
             "type": "integer",
             "format": "int64",
-            "description": "Epoch seconds; null when the feed has not reported."
+            "description": "Epoch seconds of the feed's latest report; absent when the feed has not reported."
           },
           "staleSeconds": {
             "type": "integer",
-            "format": "int32"
+            "format": "int32",
+            "description": "Seconds since `feedTimestamp`, as of when this body was produced; a cached or revalidated body keeps that value, and the age now is the current time minus `feedTimestamp`. Absent when `feedTimestamp` is."
           }
-        }
+        },
+        "required": [
+          "vehicles",
+          "missing"
+        ]
       },
       "VehicleByTripResponse": {
         "type": "object",
         "properties": {
           "vehicle": {
-            "$ref": "#/components/schemas/Vehicle"
+            "$ref": "#/components/schemas/Vehicle",
+            "description": "The trip's live vehicle; absent when none is reporting, a normal state rather than an error."
           },
           "feedTimestamp": {
             "type": "integer",
-            "format": "int64"
+            "format": "int64",
+            "description": "Epoch seconds of the feed's latest report; absent when the feed has not reported."
           },
           "staleSeconds": {
             "type": "integer",
-            "format": "int32"
+            "format": "int32",
+            "description": "Seconds since `feedTimestamp`, as of when this body was produced; a cached or revalidated body keeps that value, and the age now is the current time minus `feedTimestamp`. Absent when `feedTimestamp` is."
           }
         }
       },
       "Vehicle": {
         "type": "object",
-        "description": "A vehicle's live position. GTFS-RT producers populate wildly different subsets, so every field is optional. `currentStatus` and `occupancyStatus` are raw GTFS-RT strings passed through unchanged (no enum — unrecognized producer values must survive). `tripId`, `routeId`, `stopId` and `vehicleId` are feed-prefixed (`<feedId>:<id>`).",
+        "description": "A vehicle's live position, at most one per trip. A member the producer doesn't report is absent. `tripId`, `routeId`, `stopId` and `vehicleId` are feed-prefixed (`<feedId>:<id>`).",
         "properties": {
           "tripId": {
             "type": "string"
@@ -377,7 +813,8 @@
             "type": "string"
           },
           "label": {
-            "type": "string"
+            "type": "string",
+            "description": "The vehicle's user-visible label, as the producer gives it."
           },
           "latitude": {
             "type": "number"
@@ -386,85 +823,55 @@
             "type": "number"
           },
           "bearing": {
-            "type": "number"
+            "type": "number",
+            "description": "Degrees clockwise from true north."
           },
           "speed": {
-            "type": "number"
+            "type": "number",
+            "description": "Metres per second."
           },
           "stopId": {
             "type": "string"
           },
           "currentStatus": {
-            "type": "string"
+            "type": "string",
+            "description": "GTFS-RT `VehicleStopStatus` relative to `stopId`.",
+            "enum": [
+              "INCOMING_AT",
+              "STOPPED_AT",
+              "IN_TRANSIT_TO"
+            ]
           },
           "occupancyStatus": {
-            "type": "string"
+            "type": "string",
+            "description": "GTFS-RT `OccupancyStatus`.",
+            "enum": [
+              "EMPTY",
+              "MANY_SEATS_AVAILABLE",
+              "FEW_SEATS_AVAILABLE",
+              "STANDING_ROOM_ONLY",
+              "CRUSHED_STANDING_ROOM_ONLY",
+              "FULL",
+              "NOT_ACCEPTING_PASSENGERS",
+              "NO_DATA_AVAILABLE",
+              "NOT_BOARDABLE"
+            ]
           },
           "timestamp": {
             "type": "integer",
             "format": "int64",
-            "description": "Epoch seconds."
-          }
-        }
-      },
-      "DelaysRequest": {
-        "type": "object",
-        "description": "POST body for `/realtime/v1/delays`. Delays are resolved per trip *instance*: a GTFS-RT TripUpdate is bound to a trip instance by (trip_id, start_date), so trip ids are grouped by the GTFS `serviceDate` they run on. Group ids by date rather than sending flat (tripId, serviceDate) pairs — the cardinality is 1-2 dates x many trips. `tripIds` is required: 1 to 50 trip ids per request, counted across all `queries`. None, or more than 50, is an HTTP 400 naming `tripIds`.",
-        "properties": {
-          "queries": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/DelayQuery"
-            }
+            "description": "Epoch seconds of the position; absent when the producer doesn't report it."
           }
         },
         "required": [
-          "queries"
-        ]
-      },
-      "DelayQuery": {
-        "type": "object",
-        "properties": {
-          "serviceDate": {
-            "type": "string",
-            "description": "GTFS service date as ISO-8601 `YYYY-MM-DD` — the same format a plan leg's, departure's or trip's `serviceDate` carries, so pass it straight through. A service date is not a civil date (times may exceed 24:00), so take it from the plan leg, departure or trip, never derive it from the departure clock time. A missing or non-ISO value is an HTTP 400 naming `serviceDate`."
-          },
-          "tripIds": {
-            "type": "array",
-            "description": "Counts toward the request's limit of 50 trip ids across all `queries`.",
-            "items": {
-              "type": "string"
-            }
-          }
-        },
-        "required": [
-          "serviceDate",
-          "tripIds"
+          "tripId",
+          "latitude",
+          "longitude"
         ]
       },
       "DelaysResponse": {
         "type": "object",
-        "description": "Grouped to mirror the request: each result group attributes its delays to one `serviceDate`, so a returned delay is unambiguous. Feed freshness (`feedTimestamp`/`staleSeconds`) is global across the snapshot.",
-        "properties": {
-          "results": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/DelayGroupResult"
-            }
-          },
-          "feedTimestamp": {
-            "type": "integer",
-            "format": "int64"
-          },
-          "staleSeconds": {
-            "type": "integer",
-            "format": "int32"
-          }
-        }
-      },
-      "DelayGroupResult": {
-        "type": "object",
-        "description": "Delays for one service date. `missing` is per group — a trip id can be missing for one date yet present for another (the midnight overlap), which a single top-level `missing` would lose.",
+        "description": "Delays for the requested service date. Feed freshness (`feedTimestamp`, `staleSeconds`) is global across the snapshot.",
         "properties": {
           "serviceDate": {
             "type": "string",
@@ -478,16 +885,31 @@
           },
           "missing": {
             "type": "array",
-            "description": "Trip ids of this group with no live delay, feed-prefixed even when sent raw.",
+            "description": "Requested trip ids with no live delay on this service date, exactly as sent.",
             "items": {
               "type": "string"
             }
+          },
+          "feedTimestamp": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Epoch seconds of the feed's latest report; absent when the feed has not reported."
+          },
+          "staleSeconds": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Seconds since `feedTimestamp`, as of when this body was produced; a cached or revalidated body keeps that value, and the age now is the current time minus `feedTimestamp`. Absent when `feedTimestamp` is."
           }
-        }
+        },
+        "required": [
+          "serviceDate",
+          "delays",
+          "missing"
+        ]
       },
       "Delay": {
         "type": "object",
-        "description": "Live schedule deviation for a trip. `scheduleRelationship` is a raw GTFS-RT string. `tripId` and `routeId` are feed-prefixed (`<feedId>:<id>`).",
+        "description": "Live schedule deviation for one trip instance. A trip update without a start date applies to any requested service date; one with a start date applies to that date only. `tripId` and `routeId` are feed-prefixed (`<feedId>:<id>`).",
         "properties": {
           "tripId": {
             "type": "string"
@@ -498,22 +920,38 @@
           "delaySeconds": {
             "type": "integer",
             "format": "int32",
-            "description": "Trip-level delay; positive = late."
+            "description": "Seconds, positive when late: the delay of the last stop-time update that carries one, its departure delay before its arrival delay. Absent when the updates give only absolute times."
           },
           "scheduleRelationship": {
-            "type": "string"
+            "type": "string",
+            "description": "GTFS-RT trip `ScheduleRelationship`.",
+            "enum": [
+              "SCHEDULED",
+              "ADDED",
+              "UNSCHEDULED",
+              "CANCELED",
+              "REPLACEMENT",
+              "DUPLICATED",
+              "DELETED",
+              "NEW"
+            ]
           },
           "stopTimeUpdates": {
             "type": "array",
+            "description": "Empty when the update has none.",
             "items": {
               "$ref": "#/components/schemas/StopTimeUpdate"
             }
           }
-        }
+        },
+        "required": [
+          "tripId",
+          "stopTimeUpdates"
+        ]
       },
       "StopTimeUpdate": {
         "type": "object",
-        "description": "`stopId` is feed-prefixed (`<feedId>:<id>`).",
+        "description": "`stopId` is feed-prefixed (`<feedId>:<id>`). A member the producer doesn't set is absent.",
         "properties": {
           "stopId": {
             "type": "string"
@@ -524,19 +962,29 @@
           },
           "arrivalDelay": {
             "type": "integer",
-            "format": "int32"
+            "format": "int32",
+            "description": "Seconds, positive when late; absent when the update gives only an absolute arrival time."
           },
           "departureDelay": {
             "type": "integer",
-            "format": "int32"
+            "format": "int32",
+            "description": "Seconds, positive when late; absent when the update gives only an absolute departure time."
           },
           "scheduleRelationship": {
-            "type": "string"
+            "type": "string",
+            "description": "GTFS-RT stop-time `ScheduleRelationship`.",
+            "enum": [
+              "SCHEDULED",
+              "SKIPPED",
+              "NO_DATA",
+              "UNSCHEDULED"
+            ]
           }
         }
       },
       "AlertsResponse": {
         "type": "object",
+        "description": "The alerts active now across the environment's feeds: inside any of their active periods, or always for an alert without one.",
         "properties": {
           "alerts": {
             "type": "array",
@@ -546,29 +994,70 @@
           },
           "feedTimestamp": {
             "type": "integer",
-            "format": "int64"
+            "format": "int64",
+            "description": "Epoch seconds of the feed's latest report; absent when the feed has not reported."
           },
           "staleSeconds": {
             "type": "integer",
-            "format": "int32"
+            "format": "int32",
+            "description": "Seconds since `feedTimestamp`, as of when this body was produced; a cached or revalidated body keeps that value, and the age now is the current time minus `feedTimestamp`. Absent when `feedTimestamp` is."
           }
-        }
+        },
+        "required": [
+          "alerts"
+        ]
       },
       "Alert": {
         "type": "object",
-        "description": "A service alert. Text is already resolved to one language by the gateway. `cause`/`effect`/`severityLevel` are raw GTFS-RT strings. `id` is feed-prefixed (`<feedId>:<id>`).",
+        "description": "A service alert. Each text is the producer's first translation. A member the producer doesn't set is absent. `id` is feed-prefixed (`<feedId>:<id>`).",
         "properties": {
           "id": {
             "type": "string"
           },
           "cause": {
-            "type": "string"
+            "type": "string",
+            "description": "GTFS-RT `Cause`.",
+            "enum": [
+              "UNKNOWN_CAUSE",
+              "OTHER_CAUSE",
+              "TECHNICAL_PROBLEM",
+              "STRIKE",
+              "DEMONSTRATION",
+              "ACCIDENT",
+              "HOLIDAY",
+              "WEATHER",
+              "MAINTENANCE",
+              "CONSTRUCTION",
+              "POLICE_ACTIVITY",
+              "MEDICAL_EMERGENCY"
+            ]
           },
           "effect": {
-            "type": "string"
+            "type": "string",
+            "description": "GTFS-RT `Effect`.",
+            "enum": [
+              "NO_SERVICE",
+              "REDUCED_SERVICE",
+              "SIGNIFICANT_DELAYS",
+              "DETOUR",
+              "ADDITIONAL_SERVICE",
+              "MODIFIED_SERVICE",
+              "OTHER_EFFECT",
+              "UNKNOWN_EFFECT",
+              "STOP_MOVED",
+              "NO_EFFECT",
+              "ACCESSIBILITY_ISSUE"
+            ]
           },
           "severityLevel": {
-            "type": "string"
+            "type": "string",
+            "description": "GTFS-RT `SeverityLevel`.",
+            "enum": [
+              "UNKNOWN_SEVERITY",
+              "INFO",
+              "WARNING",
+              "SEVERE"
+            ]
           },
           "headerText": {
             "type": "string"
@@ -581,6 +1070,7 @@
           },
           "activePeriods": {
             "type": "array",
+            "description": "Empty for an alert that is always active.",
             "items": {
               "$ref": "#/components/schemas/ActivePeriod"
             }
@@ -591,10 +1081,16 @@
               "$ref": "#/components/schemas/InformedEntity"
             }
           }
-        }
+        },
+        "required": [
+          "id",
+          "activePeriods",
+          "informedEntities"
+        ]
       },
       "ActivePeriod": {
         "type": "object",
+        "description": "A period the alert is active in; an absent `start` or `end` leaves that side open.",
         "properties": {
           "start": {
             "type": "integer",
@@ -610,7 +1106,7 @@
       },
       "InformedEntity": {
         "type": "object",
-        "description": "Every id here is feed-prefixed (`<feedId>:<id>`).",
+        "description": "What the alert concerns. Every id here is feed-prefixed (`<feedId>:<id>`); one the producer doesn't set is absent.",
         "properties": {
           "agencyId": {
             "type": "string"
@@ -628,21 +1124,23 @@
       },
       "ErrorResponse": {
         "type": "object",
-        "description": "Error body: a stable machine-readable `code` (a state name) and a human-readable `message`.",
+        "description": "Error body: a stable machine-readable `code`, which names a state, and a human-readable `message`.",
         "properties": {
           "code": {
-            "type": "string"
+            "type": "string",
+            "description": "One of `bad_request`, `key_missing`, `key_invalid`, `key_not_allowed`, `agreement_inactive`, `planning_limit_reached`, `not_found`, `method_not_allowed`, `length_required`, `payload_too_large`, `rate_limited`, `internal_error`, `upstream_unavailable`, `upstream_timeout`. New codes may be added."
           },
           "message": {
             "type": "string",
-            "description": "For bad_request: `<field> is required|invalid|out of range|not allowed`."
+            "description": "For `bad_request`: `<field> is required|invalid|out of range|not allowed`, or `body is invalid` when the body is empty, not JSON or not an object."
           },
           "field": {
             "type": "string",
-            "description": "The request member a 400 names, as a dot path from the body root (array positions omitted)."
+            "description": "Present only on a 400 that names one member: its dot path from the body root, array positions omitted, or the query parameter's name."
           }
         },
         "required": [
+          "code",
           "message"
         ]
       }

@@ -2,11 +2,13 @@ import type { TransitMode } from './TransitMode.ts';
 
 export interface TripRoute {
   gtfsId: string;
-  shortName?: string;
-  longName?: string;
-  mode?: TransitMode;
+  /** Null when the feed has none. */
+  shortName: string;
+  /** Null when the feed has none. */
+  longName: string;
+  mode: TransitMode;
   /** Hex without `#`; null when the feed has none. */
-  color?: string;
+  color: string;
   /** Hex without `#`; null when the feed has none. */
-  textColor?: string;
+  textColor: string;
 }
