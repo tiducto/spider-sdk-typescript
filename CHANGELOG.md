@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.3.1 — 2026-10-07
+
+### Added
+
+- **`delayFor(delays, tripId)`** returns the trip's `TripDelay` from a `TripDelays`, or null if the feed did not
+  report it, as in the Kotlin, Dart and Swift SDKs. 1.3.0 listed it as removed; it is not.
+
 ## 1.3.0 — 2026-10-07
 
 Targets Spider API contract 1.3, a conformance release. SDKs up to 1.2 do not work against contract 1.3: realtime

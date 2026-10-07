@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { SpiderClient } from '../src/index.ts';
+import { SpiderClient, delayFor } from '../src/index.ts';
 import { mockFetch } from './support.ts';
 
 test('vehicles maps positions, missing and freshness', async () => {
@@ -99,6 +99,24 @@ test('delays gets one service date with deduplicated, sorted, untouched ids and 
   assert.deepEqual([...result.data.missing], ['1:39823']);
   assert.equal(result.data.freshness.feedTimestampEpochMs, 2_000_000);
   assert.equal(result.data.freshness.staleSeconds, 4);
+});
+
+test('delayFor finds a trip in the flat delays and is null for one the feed did not report', async () => {
+  const mock = mockFetch({
+    json: {
+      serviceDate: '2026-07-19',
+      delays: [
+        { tripId: '1:T1', delaySeconds: 60, stopTimeUpdates: [] },
+        { tripId: '1:T2', delaySeconds: 120, stopTimeUpdates: [] },
+      ],
+      missing: ['1:T10'],
+    },
+  });
+  const client = new SpiderClient('https://x', 'k', { fetch: mock.fetch });
+  const result = await client.realtime.delays('2026-07-19', ['1:T1', '1:T2', '1:T10']);
+  if (!result.isSuccess) throw new Error(result.error.code);
+  assert.equal(delayFor(result.data, '1:T2')?.delaySeconds, 120);
+  assert.equal(delayFor(result.data, '1:T10'), null);
 });
 
 test('delays sorts ids by code unit, so equal requests share one URL', async () => {

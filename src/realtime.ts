@@ -56,12 +56,17 @@ export interface TripDelay {
   readonly stopTimeUpdates: readonly StopTimeUpdate[];
 }
 
-/** Result of {@link SpiderRealtime.delays}: the delays the feed reported for one service date, and the `missing` trip ids it didn't. */
+/** Result of {@link SpiderRealtime.delays}: the delays the feed reported for one service date, and the `missing` trip ids it didn't. Look one up with {@link delayFor}. */
 export interface TripDelays {
   readonly serviceDate: string;
   readonly delays: readonly TripDelay[];
   readonly missing: readonly string[];
   readonly freshness: FeedFreshness;
+}
+
+/** The delay for `tripId` on this service date, if the feed reported one; otherwise null. */
+export function delayFor(delays: TripDelays, tripId: string): TripDelay | null {
+  return delays.delays.find((d) => d.tripId === tripId) ?? null;
 }
 
 export interface AlertActivePeriod {
