@@ -30,7 +30,7 @@ export function decodePolyline(encoded: string): LatLon[] {
     const dLon = (result & 1) !== 0 ? ~(result >> 1) : result >> 1;
     lon += dLon;
 
-    points.push({ lat: lat / 1e5, lon: lon / 1e5 });
+    points.push({ lat: lat / 1e6, lon: lon / 1e6 });
   }
   return points;
 }

@@ -45,7 +45,7 @@ test('chunk maps itineraries with realtime delays', () => {
             duration: 1800,
             trip: { gtfsId: '1:T', bikesAllowed: 'NO_INFORMATION' },
             interlineWithPreviousLeg: true,
-            legGeometry: { points: '_p~iF~ps|U' },
+            legGeometry: { points: '_izlhA~rlgdF' },
           },
         ],
       },

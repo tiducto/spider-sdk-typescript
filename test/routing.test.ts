@@ -31,7 +31,7 @@ const PLAN_RESPONSE = {
           duration: 900,
           trip: { gtfsId: '1:trip', bikesAllowed: 'ALLOWED' },
           interlineWithPreviousLeg: true,
-          legGeometry: { points: '_p~iF~ps|U' },
+          legGeometry: { points: '_izlhA~rlgdF' },
         },
       ],
     },
@@ -182,7 +182,7 @@ test('a walk leg maps its null route, trip, stops, estimates and typical delay t
     duration: 300,
     trip: null,
     interlineWithPreviousLeg: false,
-    legGeometry: { points: '_p~iF~ps|U' },
+    legGeometry: { points: '_izlhA~rlgdF' },
   }];
   const mock = mockFetch({ json: response });
   const client = new SpiderClient('https://x', 'k', { fetch: mock.fetch });
@@ -427,7 +427,7 @@ test('trip POSTs to /routing/v1/trip and maps stops, geometry and enums', async 
             stop: { gtfsId: '1:s2', name: 'Stop 2', lat: 49.2, lon: 16.7, wheelchairBoarding: 'NO_INFORMATION', platformCode: null, zoneId: null },
           },
         ],
-        tripGeometry: { points: '_p~iF~ps|U', length: 1 },
+        tripGeometry: { points: '_izlhA~rlgdF', length: 1 },
       },
     },
   });
