@@ -16,6 +16,8 @@ export interface StopDeparturesStoptime {
   typicalDelay: number | null;
   /** Null when the feed has none. */
   headsign: string | null;
+  /** The position in the trip of this departure, as the trip's `stopPosition`. */
+  stopPosition: number | null;
   /** The platform or stand the departure leaves from, which tells a station's platforms apart. */
   stop: StopDeparturesStop;
   trip: StopDeparturesTrip;

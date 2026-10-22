@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Tiducto Transit API — Realtime",
-    "version": "1.3",
+    "version": "1.4",
     "description": "GTFS-RT live data (vehicles, delays, alerts), poll-based and key-authenticated. Companion to routing and stops; the three share one pack version. A member that has no value is absent, never null. A GTFS-RT enum value the decoder doesn't recognise is omitted. Every id in a response is feed-prefixed (`<feedId>:<id>`), exactly as routing's `gtfsId` and stop search return it, and an id in a request is used exactly as sent: a raw id, or one with another feed's prefix, is unknown. A query parameter not listed is a 400 `<name> is not allowed`, and a repeated one a 400 `<name> is invalid`. A method an operation doesn't take is a 405 `method_not_allowed`, `POST /realtime/v1/delays` included, and a path under `/realtime/v1/` that matches no operation is a 404 `not_found`. A response may come from a shared cache keyed by host, URL and `apikey`; such a response is not metered. Any other path that matches no operation, and every path of an environment without a realtime deployment, is the gateway's plain-text `404 Not Found`, outside every operation."
   },
   "servers": [
