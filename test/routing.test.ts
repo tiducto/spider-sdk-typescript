@@ -23,8 +23,8 @@ const PLAN_RESPONSE = {
           realtimeState: 'UPDATED',
           realTime: true,
           serviceDate: '2026-07-20',
-          from: { name: 'A', stop: { gtfsId: '1:A', wheelchairBoarding: 'POSSIBLE', platformCode: '2', zoneId: '100' } },
-          to: { name: 'B', stop: { gtfsId: '1:B', wheelchairBoarding: 'NOT_POSSIBLE', platformCode: 'B', zoneId: '101' } },
+          from: { name: 'A', stopPosition: 2, stop: { gtfsId: '1:A', wheelchairBoarding: 'POSSIBLE', platformCode: '2', zoneId: '100' } },
+          to: { name: 'B', stopPosition: 5, stop: { gtfsId: '1:B', wheelchairBoarding: 'NOT_POSSIBLE', platformCode: 'B', zoneId: '101' } },
           route: { gtfsId: '1:L1', shortName: '1', longName: 'Line 1', color: 'FF0000', textColor: 'FFFFFF' },
           headsign: 'Center',
           distance: 1200.5,
@@ -89,6 +89,8 @@ test('plan POSTs the REST body to /routing/v1/plan and maps the route', async ()
   assert.equal(leg.toWheelchair, 'NOT_POSSIBLE');
   assert.equal(leg.fromGtfsId, '1:A');
   assert.equal(leg.toGtfsId, '1:B');
+  assert.equal(leg.fromStopPosition, 2);
+  assert.equal(leg.toStopPosition, 5);
   assert.equal(leg.fromPlatformCode, '2');
   assert.equal(leg.toPlatformCode, 'B');
   assert.equal(leg.fromZoneId, '100');
@@ -197,6 +199,7 @@ test('a walk leg maps its null route, trip, stops, estimates and typical delay t
   assert.equal(leg.serviceDate, null);
   assert.equal(leg.fromName, 'Origin');
   assert.equal(leg.fromGtfsId, null);
+  assert.equal(leg.fromStopPosition, null);
   assert.equal(leg.toGtfsId, '1:A');
   assert.equal(leg.toPlatformCode, null);
   assert.equal(leg.toWheelchair, null);
@@ -299,6 +302,7 @@ test('departures POSTs to /routing/v1/departures, maps stoptimes, keeps rows hea
             realtime: true,
             realtimeState: 'UPDATED',
             typicalDelay: 45,
+            stopPosition: 7,
             headsign: 'Center',
             stop: { gtfsId: '1:U1Z2', platformCode: '2' },
             trip: {
@@ -346,6 +350,7 @@ test('departures POSTs to /routing/v1/departures, maps stoptimes, keeps rows hea
   assert.equal(d.platformCode, '2');
   assert.equal(d.wheelchairAccessible, 'POSSIBLE');
   assert.equal(d.typicalDelaySeconds, 45);
+  assert.equal(d.stopPosition, 7);
   // Null display fields and NO_INFORMATION stay null.
   const bare = result.data[1];
   assert.equal(bare.realtimeTimeEpochMs, 1_120_000);
@@ -356,6 +361,7 @@ test('departures POSTs to /routing/v1/departures, maps stoptimes, keeps rows hea
   assert.equal(bare.platformCode, null);
   assert.equal(bare.wheelchairAccessible, null);
   assert.equal(bare.typicalDelaySeconds, null);
+  assert.equal(bare.stopPosition, null);
 });
 
 test('departure serviceDate is the trip\'s service day, across midnight and DST', async () => {
@@ -404,6 +410,8 @@ test('trip POSTs to /routing/v1/trip and maps stops, geometry and enums', async 
             realtime: false,
             realtimeState: 'SCHEDULED',
             typicalDelay: 30,
+            stopPosition: 3,
+            geometryIndex: 0,
             stop: { gtfsId: '1:s1', name: 'Stop 1', lat: 49.1, lon: 16.6, wheelchairBoarding: 'POSSIBLE', platformCode: 'A', zoneId: '100' },
           },
           {
@@ -415,6 +423,7 @@ test('trip POSTs to /routing/v1/trip and maps stops, geometry and enums', async 
             realtime: true,
             realtimeState: 'UPDATED',
             typicalDelay: null,
+            stopPosition: 5,
             stop: { gtfsId: '1:s2', name: 'Stop 2', lat: 49.2, lon: 16.7, wheelchairBoarding: 'NO_INFORMATION', platformCode: null, zoneId: null },
           },
         ],
@@ -444,6 +453,9 @@ test('trip POSTs to /routing/v1/trip and maps stops, geometry and enums', async 
   assert.equal(trip.stops[0].name, 'Stop 1');
   assert.equal(trip.stops[0].typicalDelaySeconds, 30);
   assert.equal(trip.stops[1].typicalDelaySeconds, null);
+  assert.deepEqual(trip.stops.map((s) => s.stopPosition), [3, 5]);
+  assert.deepEqual(trip.geometry[trip.stops[0].geometryIndex ?? -1], { lat: 38.5, lon: -120.2 });
+  assert.equal(trip.stops[1].geometryIndex, null);
   assert.equal(trip.stops[0].scheduledArrivalEpochMs, (SERVICE_DAY_2026_07_20 + 60) * 1000);
   assert.equal(trip.stops[0].wheelchairBoarding, 'POSSIBLE');
   assert.equal(trip.stops[1].realtimeArrivalEpochMs, (SERVICE_DAY_2026_07_20 + 150) * 1000);

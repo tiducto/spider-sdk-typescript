@@ -66,6 +66,9 @@ export interface Leg {
   /** Stop ids of the leg's endpoints; null for a coordinate endpoint. */
   readonly fromGtfsId: string | null;
   readonly toGtfsId: string | null;
+  /** Positions of the leg's boarding and alighting stops in its trip: the {@link TripStop} of {@link SpiderRouting.trip} with the same `stopPosition` is that stop. Null on a walk leg. */
+  readonly fromStopPosition: number | null;
+  readonly toStopPosition: number | null;
   readonly fromPlatformCode: string | null;
   readonly toPlatformCode: string | null;
   readonly fromZoneId: string | null;
@@ -184,6 +187,8 @@ export interface Departure {
   readonly stopGtfsId: string;
   readonly platformCode: string | null;
   readonly wheelchairAccessible: WheelchairBoarding | null;
+  /** The departure's position in its trip, as the trip's {@link TripStop.stopPosition}. */
+  readonly stopPosition: number | null;
 }
 
 export interface TripStop {
@@ -201,6 +206,10 @@ export interface TripStop {
   readonly wheelchairBoarding: WheelchairBoarding | null;
   readonly platformCode: string | null;
   readonly zoneId: string | null;
+  /** The stop's position in the trip: increasing along it, not necessarily from 0 or consecutive. A leg's `fromStopPosition` or `toStopPosition`, or a departure's `stopPosition`, equal to it names this stop, also on a trip that visits one stop twice. Realtime that adds or removes stops can change it. */
+  readonly stopPosition: number | null;
+  /** Index into {@link TripDetails.geometry} of where the stop sits on the trip's line; null when the trip has no geometry or the stop has no point on it. */
+  readonly geometryIndex: number | null;
 }
 
 export interface TripDetails {
@@ -745,6 +754,8 @@ function mapLeg(leg: LegWire): Leg {
     toName: leg.to.name,
     fromGtfsId: fromStop?.gtfsId ?? null,
     toGtfsId: toStop?.gtfsId ?? null,
+    fromStopPosition: leg.from.stopPosition ?? null,
+    toStopPosition: leg.to.stopPosition ?? null,
     fromPlatformCode: fromStop?.platformCode ?? null,
     toPlatformCode: toStop?.platformCode ?? null,
     fromZoneId: fromStop?.zoneId ?? null,
@@ -788,6 +799,7 @@ function mapDepartures(stop: DepartureBoard): Departure[] {
       stopGtfsId: st.stop.gtfsId,
       platformCode: st.stop.platformCode ?? null,
       wheelchairAccessible: wheelchairFromWire(st.trip.wheelchairAccessible),
+      stopPosition: st.stopPosition ?? null,
     };
   });
 }
@@ -812,6 +824,8 @@ function mapTrip(trip: TripTimetable): TripDetails {
       wheelchairBoarding: wheelchairFromWire(s.wheelchairBoarding),
       platformCode: s.platformCode ?? null,
       zoneId: s.zoneId ?? null,
+      stopPosition: st.stopPosition ?? null,
+      geometryIndex: st.geometryIndex ?? null,
     };
   });
   return {
