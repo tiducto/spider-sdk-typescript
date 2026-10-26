@@ -13,6 +13,7 @@ export interface Leg {
   end: LegTime;
   /** Seconds of delay applied to this leg's arrival at the requested `reliability`: that level's percentile (p50, p70 or p90) of the trip's recorded delay at the alighting stop on the service date's day type, from the environment's realtime history, never below 0 and never decreasing along the trip's pattern. Null when `reliability` is omitted, the trip has live realtime or there is no history, and on a walk leg. */
   typicalArrivalDelay: number | null;
+  /** The realtime state of the leg's trip; `SCHEDULED` on a walk leg. */
   realtimeState: RealtimeState;
   /** True when the leg's times include realtime. */
   realTime: boolean;

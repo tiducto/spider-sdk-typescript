@@ -1,4 +1,4 @@
 export interface Geometry {
-  /** Encoded polyline (precision 1e5). */
+  /** Encoded polyline (precision 1e6). */
   points: string;
 }

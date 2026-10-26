@@ -16,7 +16,10 @@ export type ViaLocation =
   | { readonly kind: 'visit'; readonly location: Location; readonly minimumWaitSeconds: number };
 
 /**
- * A point the itinerary must pass. How many a request may carry is an environment setting. Each pass-through takes
+ * A point the itinerary must pass, in the order given; visits and pass-throughs may be mixed. A pass-through is
+ * passed on board, alighting there, or starting there: a stop where the vehicle does not let passengers off is not
+ * passed on board, and walking there to board is not a pass. A visit alights there and boards again after the wait.
+ * How many a request may carry is an environment setting. Each pass-through takes
  * 1 to 10 stop ids, else the request fails as `bad_request` on `via`. A visit is to a stop and waits 0 to 3600
  * seconds: a coordinate fails as `bad_request` on `via` (`via is invalid`), and a wait outside that range on
  * `via.visit.minimumWaitTime`.

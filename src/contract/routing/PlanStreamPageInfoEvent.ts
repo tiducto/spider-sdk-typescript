@@ -12,6 +12,6 @@ export interface PlanStreamPageInfoEvent {
   hasPreviousPage: boolean;
   /** The window the stream searched, as an ISO-8601 duration; null when no transit search ran, as for a declined, direct-only or unroutable plan. */
   searchWindowUsed: string | null;
-  /** Why the plan was declined; empty when it was not. */
+  /** Why the plan was declined or kept no transit itinerary in the window; empty otherwise. */
   routingErrors: RoutingError[];
 }
