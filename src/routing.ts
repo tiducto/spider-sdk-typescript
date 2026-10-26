@@ -57,6 +57,7 @@ export interface Leg {
   /** Typical delay in seconds planned onto this leg's arrival at the requested `reliability`; null when none was requested or there is no history. */
   readonly typicalArrivalDelaySeconds: number | null;
   readonly isRealtime: boolean;
+  /** The realtime state of the leg's trip; `SCHEDULED` on a walk leg. */
   readonly realtimeState: RealtimeState;
   /** GTFS service date this leg's trip runs on (ISO `YYYY-MM-DD`) — pass to realtime `delays` lookups; null on a walk leg. */
   readonly serviceDate: string | null;
@@ -125,7 +126,11 @@ export interface RoutingError {
   readonly description: string;
   /**
    * The input the error is about, when there is one. A `LOCATION_NOT_FOUND` names `FROM` (origin), `TO`
-   * (destination) or `VIA` (a via stop id the environment doesn't know).
+   * (destination) or `VIA` (a via stop id the environment doesn't know), or `FROM` or `TO` for a coordinate with no
+   * street near enough to link to. An `OUTSIDE_BOUNDS` names `FROM` or `TO` (a coordinate outside the area the
+   * router covers), `NO_STOPS_IN_RANGE` `FROM` or `TO`, and `NO_TRANSIT_CONNECTION_IN_SEARCH_WINDOW` and
+   * `OUTSIDE_SERVICE_PERIOD` `DATE_TIME`. `NO_TRANSIT_CONNECTION`, `WALKING_BETTER_THAN_TRANSIT` and
+   * `NO_DIRECT_MODE_CONNECTION` name none.
    */
   readonly inputField: InputField | null;
 }
@@ -133,6 +138,7 @@ export interface RoutingError {
 export interface Route {
   readonly edges: readonly RouteEdge[];
   readonly pageInfo: RoutePageInfo;
+  /** Why the plan was declined or kept no transit itinerary in the window; empty otherwise. */
   readonly routingErrors: readonly RoutingError[];
   readonly searchDateTime: string;
 }
@@ -154,7 +160,7 @@ export type PlanStreamEvent =
        * (`startCursor`), gated on `hasNextPage` / `hasPreviousPage`. */
       readonly type: 'done';
       readonly pageInfo: RoutePageInfo;
-      /** Why the sweep found nothing, mirroring {@link Route.routingErrors}; empty when there is nothing to report. */
+      /** Why the plan was declined or kept no transit itinerary in the swept window, mirroring {@link Route.routingErrors}; empty otherwise. */
       readonly routingErrors: readonly RoutingError[];
     }
   | {
@@ -247,7 +253,11 @@ export interface PlanOptions {
    * dynamic route-dependent window — predictable cost + paging. Widen for sparse/intercity routes.
    */
   readonly searchWindowMinutes?: number;
-  /** Prefer wheelchair-accessible routing. */
+  /**
+   * Plan for a wheelchair user: ride only trips the feed marks wheelchair accessible, board and alight only at stops
+   * it marks accessible (no information counts as not accessible), and walk strongly avoiding steps and ways mapped
+   * as not wheelchair accessible. The feed's accessibility data limits what this guarantees.
+   */
   readonly wheelchairAccessible?: boolean;
   /** Plan arrivals with typical delays at this level. Undefined = plan on the timetable. */
   readonly reliability?: Reliability;

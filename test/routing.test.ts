@@ -603,6 +603,22 @@ test('routing errors decode FROM/TO/VIA, and unknown codes, fields and enums dec
   assert.equal(mapped.bikesAllowed, 'UNKNOWN');
 });
 
+test('routing errors decode contract 1.5\'s codes: OUTSIDE_BOUNDS, NO_TRANSIT_CONNECTION_IN_SEARCH_WINDOW, NO_DIRECT_MODE_CONNECTION', async () => {
+  const errors = [
+    { code: 'OUTSIDE_BOUNDS', description: 'origin outside bounds', inputField: 'FROM' },
+    { code: 'LOCATION_NOT_FOUND', description: 'destination is unknown', inputField: 'TO' },
+    { code: 'NO_TRANSIT_CONNECTION_IN_SEARCH_WINDOW', description: 'no transit in window', inputField: 'DATE_TIME' },
+    { code: 'NO_DIRECT_MODE_CONNECTION', description: 'no direct walk', inputField: null },
+  ];
+  const mock = mockFetch({ json: { ...structuredClone(PLAN_RESPONSE), itineraries: [], routingErrors: errors } });
+  const client = new SpiderClient('https://x', 'k', { fetch: mock.fetch });
+
+  const result = await client.routing.plan({ origin: Location.coordinate(48.5, 11.0), destination: Location.coordinate(48.6958, 16.637) });
+
+  if (!result.isSuccess) throw new Error(result.error.code);
+  assert.deepEqual(result.data.routingErrors, errors);
+});
+
 test('departures and trip decode unknown realtime states and modes to UNKNOWN', async () => {
   const mock = mockFetch({
     json: {

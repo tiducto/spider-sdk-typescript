@@ -117,6 +117,23 @@ test('pageInfo routingErrors map onto done like the batch plan', () => {
   ]);
 });
 
+test('pageInfo carries the no-transit notices of a search that ran', () => {
+  const data = JSON.stringify({
+    startCursor: null,
+    endCursor: null,
+    hasNextPage: false,
+    hasPreviousPage: false,
+    searchWindowUsed: 'PT2H',
+    routingErrors: [{ code: 'NO_TRANSIT_CONNECTION_IN_SEARCH_WINDOW', description: 'no transit', inputField: 'DATE_TIME' }],
+  });
+  const event = parsePlanStreamRecord('pageInfo', data);
+  assert.equal(event?.type, 'done');
+  if (event?.type !== 'done') return;
+  assert.deepEqual(event.routingErrors, [
+    { code: 'NO_TRANSIT_CONNECTION_IN_SEARCH_WINDOW', description: 'no transit', inputField: 'DATE_TIME' },
+  ]);
+});
+
 // The wire `done` telemetry frame just ends the stream — it is dropped, not surfaced as an event.
 test('done frame is dropped', () => {
   const data = JSON.stringify({ iterations: 3, windowSeconds: 3600, resultCount: 5, stoppedBy: 'targetResults' });
@@ -150,7 +167,7 @@ test('planStream POSTs the REST body to /routing/v1/plan-stream and streams resu
     origin: Location.stop('1:A'),
     destination: Location.coordinate(49.2, 16.6),
     departAt: new Date('2026-07-15T08:00:00Z'),
-    via: [ViaLocation.passThrough('1:V')],
+    via: [ViaLocation.visit(Location.stop('1:W'), 60), ViaLocation.passThrough('1:V')],
     targetResults: 5,
     maxWindowMinutes: 180,
     reliability: 'SAFE',
@@ -169,7 +186,7 @@ test('planStream POSTs the REST body to /routing/v1/plan-stream and streams resu
     '{"dateTime":{"earliestDeparture":"2026-07-15T08:00:00.000Z"},'
       + '"origin":{"location":{"stopLocation":{"stopLocationId":"1:A"}}},'
       + '"destination":{"location":{"coordinate":{"latitude":49.2,"longitude":16.6}}},'
-      + '"via":[{"passThrough":{"stopLocationIds":["1:V"]}}],'
+      + '"via":[{"visit":{"stopLocationIds":["1:W"],"minimumWaitTime":"PT60S"}},{"passThrough":{"stopLocationIds":["1:V"]}}],'
       + '"targetResults":5,"maxWindow":"PT180M","reliability":"SAFE"}',
   );
 
