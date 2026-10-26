@@ -1,5 +1,27 @@
 # Changelog
 
+## 1.5.0 — 2026-10-26
+
+Targets Spider API contract 1.5.
+
+### Added
+
+- **`RoutingErrorCode` `OUTSIDE_BOUNDS`, `NO_TRANSIT_CONNECTION_IN_SEARCH_WINDOW` and `NO_DIRECT_MODE_CONNECTION`**,
+  which earlier versions decode as `UNKNOWN`. A coordinate origin or destination outside the area the router covers
+  is `OUTSIDE_BOUNDS` on `FROM` or `TO`, and one with no street near enough to link to is `LOCATION_NOT_FOUND`. A
+  search that ran and kept no transit itinerary in the window now says why in `Route.routingErrors` and the stream's
+  `done` event: `NO_TRANSIT_CONNECTION_IN_SEARCH_WINDOW` on `DATE_TIME`, or `WALKING_BETTER_THAN_TRANSIT` when
+  walking beat every transit itinerary found. A direct-only plan that finds no walk is `NO_DIRECT_MODE_CONNECTION`.
+
+### Changed
+
+- **`via` may mix `ViaLocation.visit` and `ViaLocation.passThrough`**, in the order given; the router used to answer
+  a mix as `bad_request` on `via`.
+- **`wheelchairAccessible`** plans for a wheelchair user: only trips the feed marks wheelchair accessible, boarding
+  and alighting only at stops it marks accessible (no information counts as not accessible), walking strongly
+  avoiding steps and ways mapped as not wheelchair accessible.
+- **`Leg.realtimeState`** is `SCHEDULED` on a walk leg.
+
 ## 1.4.1
 
 ### Changed
