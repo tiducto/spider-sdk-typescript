@@ -15,6 +15,8 @@ export interface FeedFreshness {
 /** A vehicle's live position. `tripId`, `routeId`, `stopId` and `vehicleId` are feed-prefixed (`<feedId>:<id>`). */
 export interface LiveVehicle {
   readonly tripId: string;
+  /** GTFS service date (ISO `YYYY-MM-DD`) of the trip run the vehicle is on. */
+  readonly serviceDate: string;
   readonly routeId: string | null;
   readonly vehicleId: string | null;
   readonly label: string | null;
@@ -110,14 +112,18 @@ export class SpiderRealtime {
   }
 
   /**
-   * Live positions for up to 50 feed-prefixed trip ids (`<feedId>:<id>`), sent untouched. Empty input skips the
-   * call; more than 50 fails as `bad_request` without a request.
+   * Live positions for up to 50 feed-prefixed trip ids (`<feedId>:<id>`), sent untouched, running on one GTFS service
+   * date (ISO `YYYY-MM-DD`, a plan leg's or departure's `serviceDate`): a vehicle is returned only while it runs that
+   * trip run. Empty input skips the call; a malformed date or more than 50 ids fails as `bad_request` without a request.
    */
-  async vehicles(tripIds: readonly string[]): Promise<SpiderResult<VehiclePositions>> {
+  async vehicles(serviceDate: string, tripIds: readonly string[]): Promise<SpiderResult<VehiclePositions>> {
+    const invalid = invalidServiceDate(serviceDate);
+    if (invalid != null) return failure(invalid);
     if (tripIds.length === 0) return success(EMPTY_POSITIONS);
     if (tripIds.length > MAX_TRIP_IDS) return failure(badRequest('tripIds'));
     try {
       const dto = await this.transport.getJson<VehiclesResponseWire>('/realtime/v1/vehicles', {
+        serviceDate,
         tripIds: tripIds.join(','),
       });
       return success({
@@ -130,11 +136,17 @@ export class SpiderRealtime {
     }
   }
 
-  /** The live position of one feed-prefixed trip id (`<feedId>:<id>`), sent untouched; `vehicle` is null when none reports. */
-  async vehicleForTrip(tripId: string): Promise<SpiderResult<LiveVehicleUpdate>> {
+  /**
+   * The live position of one trip run: a feed-prefixed trip id (`<feedId>:<id>`), sent untouched, on one GTFS service
+   * date (ISO `YYYY-MM-DD`, a plan leg's or departure's `serviceDate`); `vehicle` is null when none reports. A
+   * malformed date fails as `bad_request` without a request.
+   */
+  async vehicleForTrip(tripId: string, serviceDate: string): Promise<SpiderResult<LiveVehicleUpdate>> {
+    const invalid = invalidServiceDate(serviceDate);
+    if (invalid != null) return failure(invalid);
     const path = `/realtime/v1/vehicles/by-trip/${encodeURIComponent(tripId)}`;
     try {
-      const raw = await this.transport.getRaw(path);
+      const raw = await this.transport.getRaw(path, { serviceDate });
       if (!raw.ok) {
         const error = httpFailure(`GET ${path}`, raw.status, raw.text);
         // A 404 is "no vehicle" unless its body names a plan limit.
@@ -206,6 +218,7 @@ function mapFreshness(dto: FreshnessWire): FeedFreshness {
 function mapVehicle(v: VehicleDtoWire): LiveVehicle {
   return {
     tripId: v.tripId,
+    serviceDate: v.serviceDate,
     routeId: v.routeId ?? null,
     vehicleId: v.vehicleId ?? null,
     label: v.label ?? null,
@@ -270,6 +283,7 @@ interface FreshnessWire {
 
 interface VehicleDtoWire {
   tripId: string;
+  serviceDate: string;
   routeId?: string;
   vehicleId?: string;
   label?: string;

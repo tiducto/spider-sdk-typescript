@@ -15,7 +15,7 @@ export interface Stoptime {
   /** True when `realtimeArrival` and `realtimeDeparture` come from realtime. */
   realtime: boolean;
   realtimeState: RealtimeState;
-  /** The trip's usual delay at this stop in seconds: the median (p50) recorded on the service date's day type, from the environment's realtime history, never below 0 and never decreasing along the trip's pattern. Null when the trip has live realtime or there is no history. */
+  /** Seconds of delay at the requested `reliability`: that level's percentile of the trip's recorded delay at this stop on the service date's day type, from the environment's realtime history. Never below 0. At each level, no trip arrives at a stop, delay applied, before an earlier trip of the same pattern does. Null when `reliability` is omitted, when the trip has live realtime, a canceled trip included, or when there is no history. */
   typicalDelay: number | null;
   /** The stop time's position in the trip: increasing along it, not necessarily from 0 or consecutive. Realtime that adds or removes stops can change it. */
   stopPosition: number | null;

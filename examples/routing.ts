@@ -73,7 +73,7 @@ export async function departures(client: SpiderClient) {
 }
 
 export async function tripLookup(client: SpiderClient) {
-  const result = await client.routing.trip('1:12345')
+  const result = await client.routing.trip('1:12345', '2026-07-20')
 
   if (result.isSuccess) {
     for (const stop of result.data.stops) {

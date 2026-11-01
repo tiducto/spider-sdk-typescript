@@ -25,6 +25,7 @@ export type {
   Departure,
   TripDetails,
   TripStop,
+  EstimatedDelays,
   PlanOptions,
   PlanStreamRequestOptions,
   PlanStreamEvent,

@@ -62,10 +62,11 @@ test('a plan-limit refusal reaches every surface as its own code', async () => {
     const calls: Record<string, () => Promise<SpiderResult<unknown>>> = {
       plan: () => client.routing.plan({ origin: Location.coordinate(1, 2), destination: Location.coordinate(3, 4) }),
       departures: () => client.routing.departures('1:S'),
-      trip: () => client.routing.trip('1:T'),
+      trip: () => client.routing.trip('1:T', '2026-09-30'),
+      estimatedDelays: () => client.routing.estimatedDelays('1:T', '2026-09-30', 0),
       stopSearch: () => client.stops.search({ name: 'x' }),
-      vehicles: () => client.realtime.vehicles(['1:T']),
-      vehicleForTrip: () => client.realtime.vehicleForTrip('1:T'),
+      vehicles: () => client.realtime.vehicles('2026-09-30', ['1:T']),
+      vehicleForTrip: () => client.realtime.vehicleForTrip('1:T', '2026-09-30'),
       delays: () => client.realtime.delays('2026-09-30', ['1:T']),
       alerts: () => client.realtime.alerts(),
     };

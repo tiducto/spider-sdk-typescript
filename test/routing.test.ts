@@ -252,9 +252,8 @@ test('a declined plan is a route with no itineraries and the routing errors', as
   assert.equal(await client.routing.planPrevious(result.data), null);
 });
 
-// Europe/Prague service-day anchors (noon minus 12h, local): 2026-07-20 (CEST) and the 2026-10-25 DST change.
+// Europe/Prague service-day anchor (noon minus 12h, local) of 2026-07-20 (CEST).
 const SERVICE_DAY_2026_07_20 = 1_784_498_400;
-const SERVICE_DAY_2026_10_25 = 1_792_882_800;
 
 const TRIP_WITHOUT_STOPS = {
   trip: {
@@ -272,6 +271,7 @@ const TRIP_WITHOUT_STOPS = {
 function departureRow(overrides: Record<string, unknown>): Record<string, unknown> {
   return {
     serviceDay: 1000,
+    serviceDate: '2026-07-20',
     scheduledDeparture: 60,
     realtimeDeparture: 60,
     realtime: false,
@@ -298,6 +298,7 @@ test('departures POSTs to /routing/v1/departures, maps stoptimes, keeps rows hea
         wheelchairBoarding: 'POSSIBLE',
         stoptimesWithoutPatterns: [
           departureRow({
+            serviceDate: '2026-07-19',
             realtimeDeparture: 90,
             realtime: true,
             realtimeState: 'UPDATED',
@@ -342,7 +343,7 @@ test('departures POSTs to /routing/v1/departures, maps stoptimes, keeps rows hea
   assert.equal(d.realtimeTimeEpochMs, 1_090_000);
   assert.equal(d.routeShortName, '5');
   assert.equal(d.mode, 'BUS');
-  assert.equal(d.serviceDate, '1970-01-01');
+  assert.equal(d.serviceDate, '2026-07-19');
   assert.equal(d.routeGtfsId, '1:L5');
   assert.equal(d.routeColor, '00A0E0');
   assert.equal(d.routeTextColor, '000000');
@@ -364,30 +365,15 @@ test('departures POSTs to /routing/v1/departures, maps stoptimes, keeps rows hea
   assert.equal(bare.stopPosition, null);
 });
 
-test('departure serviceDate is the trip\'s service day, across midnight and DST', async () => {
-  const mock = mockFetch({
-    json: {
-      stop: {
-        gtfsId: 'S1',
-        name: 'Station',
-        wheelchairBoarding: null,
-        stoptimesWithoutPatterns: [
-          departureRow({ serviceDay: SERVICE_DAY_2026_07_20, scheduledDeparture: 24 * 3600 + 40 * 60, realtimeDeparture: 24 * 3600 + 40 * 60, typicalDelay: 20 }),
-          departureRow({ serviceDay: SERVICE_DAY_2026_10_25, scheduledDeparture: 8 * 3600, realtimeDeparture: 8 * 3600 }),
-        ],
-      },
-    },
-  });
+test('departures sends reliability only when set', async () => {
+  const mock = mockFetch({ json: { stop: { gtfsId: 'U1', name: 'Main', stoptimesWithoutPatterns: [] } } });
   const client = new SpiderClient('https://x', 'k', { fetch: mock.fetch });
-  const result = await client.routing.departures('S1');
 
-  if (!result.isSuccess) throw new Error(result.error.code);
-  const [night, dst] = result.data;
-  assert.equal(new Date(night.scheduledTimeEpochMs).toISOString(), '2026-07-20T22:40:00.000Z');
-  assert.equal(night.serviceDate, '2026-07-20');
-  assert.equal(night.typicalDelaySeconds, 20);
-  assert.equal(dst.serviceDate, '2026-10-25');
-  assert.equal(dst.typicalDelaySeconds, null);
+  await client.routing.departures('U1', 5);
+  await client.routing.departures('U1', 5, { reliability: 'SAFE' });
+
+  assert.equal(mock.calls[0].body, '{"id":"U1","numberOfDepartures":5,"timeRange":86400}');
+  assert.equal(mock.calls[1].body, '{"id":"U1","numberOfDepartures":5,"timeRange":86400,"reliability":"SAFE"}');
 });
 
 test('trip POSTs to /routing/v1/trip and maps stops, geometry and enums', async () => {
@@ -465,13 +451,31 @@ test('trip POSTs to /routing/v1/trip and maps stops, geometry and enums', async 
   assert.equal(trip.geometry.length, 1);
 });
 
-test('trip without a service date leaves it out of the body', async () => {
+test('trip sends reliability only when set', async () => {
   const mock = mockFetch({ json: TRIP_WITHOUT_STOPS });
   const client = new SpiderClient('https://x', 'k', { fetch: mock.fetch });
 
-  await client.routing.trip('t1');
+  await client.routing.trip('t1', '2026-07-20');
+  await client.routing.trip('t1', '2026-07-20', 'VERY_SAFE');
 
-  assert.equal(mock.calls[0].body, '{"id":"t1"}');
+  assert.equal(mock.calls[0].body, '{"id":"t1","serviceDate":"2026-07-20"}');
+  assert.equal(mock.calls[1].body, '{"id":"t1","serviceDate":"2026-07-20","reliability":"VERY_SAFE"}');
+});
+
+test('trip without a service date is bad_request without a request', async () => {
+  const mock = mockFetch({ json: TRIP_WITHOUT_STOPS });
+  const client = new SpiderClient('https://x', 'k', { fetch: mock.fetch });
+  // Required by the type; a plain-JS caller can still omit it.
+  const untypedTrip = client.routing.trip.bind(client.routing) as unknown as (tripId: string) => ReturnType<typeof client.routing.trip>;
+
+  const result = await untypedTrip('t1');
+
+  assert.equal(result.isSuccess, false);
+  if (!result.isSuccess) {
+    assert.equal(result.error.code, 'bad_request');
+    assert.equal(result.error.field, 'serviceDate');
+  }
+  assert.equal(mock.calls.length, 0);
 });
 
 test('trip rejects a malformed service date as bad_request without a request', async () => {
@@ -489,13 +493,13 @@ test('trip rejects a malformed service date as bad_request without a request', a
   assert.equal(mock.calls.length, 0);
 });
 
-test('trip on a date it does not run has no service date', async () => {
+test('trip on a date it does not run keeps the requested service date', async () => {
   const mock = mockFetch({ json: TRIP_WITHOUT_STOPS });
   const client = new SpiderClient('https://x', 'k', { fetch: mock.fetch });
   const result = await client.routing.trip('t1', '2026-07-20');
 
   if (!result.isSuccess) throw new Error(result.error.code);
-  assert.equal(result.data.serviceDate, null);
+  assert.equal(result.data.serviceDate, '2026-07-20');
   assert.equal(result.data.stops.length, 0);
   assert.equal(result.data.geometry.length, 0);
   assert.equal(result.data.routeGtfsId, '1:L5');
@@ -512,9 +516,82 @@ test('an unknown stop or trip id (a 200 with null) is not_found', async () => {
   assert.equal(departures.isSuccess, false);
   if (!departures.isSuccess) assert.equal(departures.error.code, 'not_found');
 
-  const trip = await client.routing.trip('1:nope');
+  const trip = await client.routing.trip('1:nope', '2026-07-20');
   assert.equal(trip.isSuccess, false);
   if (!trip.isSuccess) assert.equal(trip.error.code, 'not_found');
+});
+
+test('estimatedDelays GETs /routing/v1/estimated-delays with the trip run and stop, and maps each level by name', async () => {
+  const mock = mockFetch({
+    json: {
+      estimatedDelays: [
+        { reliability: 'VERY_SAFE', delay: 210 },
+        { reliability: 'STANDARD', delay: 40 },
+        { reliability: 'SAFE', delay: 95 },
+      ],
+    },
+  });
+  const client = new SpiderClient('https://x', 'k', { fetch: mock.fetch });
+  const result = await client.routing.estimatedDelays('1:t 1', '2026-07-20', 4);
+
+  const call = mock.calls[0];
+  assert.equal(call.method, 'GET');
+  assert.equal(call.url, 'https://x/routing/v1/estimated-delays?tripId=1%3At+1&serviceDate=2026-07-20&stopPosition=4');
+  assert.equal(call.headers.get('apikey'), 'k');
+  assert.equal(call.headers.get('x-spider-contract-version'), CONTRACT_VERSION);
+  assert.equal(call.headers.get('x-spider-sdk'), SDK_IDENTITY);
+  if (!result.isSuccess) throw new Error(result.error.code);
+  assert.deepEqual(result.data, { standardSeconds: 40, safeSeconds: 95, verySafeSeconds: 210 });
+});
+
+test('estimatedDelays is a null success when the API has none', async () => {
+  const mock = mockFetch({ json: { estimatedDelays: null } });
+  const client = new SpiderClient('https://x', 'k', { fetch: mock.fetch });
+  const result = await client.routing.estimatedDelays('1:nope', '2026-07-20', 0);
+
+  if (!result.isSuccess) throw new Error(result.error.code);
+  assert.equal(result.data, null);
+});
+
+test('estimatedDelays fails decoding when a level is missing or the body is not the table', async () => {
+  for (const json of [
+    { estimatedDelays: [{ reliability: 'STANDARD', delay: 40 }, { reliability: 'SAFE', delay: 95 }] },
+    { estimatedDelays: [{ reliability: 'STANDARD', delay: 40 }, { reliability: 'SAFE', delay: 95 }, { reliability: 'VERY_SAFE', delay: null }] },
+    { estimatedDelays: { STANDARD: 40 } },
+    {},
+  ]) {
+    const client = new SpiderClient('https://x', 'k', { fetch: mockFetch({ json }).fetch });
+    const result = await client.routing.estimatedDelays('1:t1', '2026-07-20', 0);
+    assert.equal(result.isSuccess, false, JSON.stringify(json));
+    if (!result.isSuccess) assert.equal(result.error.code, 'decoding');
+  }
+});
+
+test('estimatedDelays rejects a malformed service date as bad_request without a request', async () => {
+  const mock = mockFetch({ json: { estimatedDelays: null } });
+  const client = new SpiderClient('https://x', 'k', { fetch: mock.fetch });
+
+  for (const serviceDate of ['20260720', '2026-02-30', '']) {
+    const result = await client.routing.estimatedDelays('1:t1', serviceDate, 0);
+    assert.equal(result.isSuccess, false, serviceDate);
+    if (!result.isSuccess) {
+      assert.equal(result.error.code, 'bad_request');
+      assert.equal(result.error.field, 'serviceDate');
+    }
+  }
+  assert.equal(mock.calls.length, 0);
+});
+
+test('an estimatedDelays 400 is bad_request on the field the server names', async () => {
+  const mock = mockFetch({ status: 400, json: { code: 'bad_request', message: 'stopPosition is invalid', field: 'stopPosition' } });
+  const client = new SpiderClient('https://x', 'k', { fetch: mock.fetch });
+  const result = await client.routing.estimatedDelays('1:t1', '2026-07-20', -1);
+
+  assert.equal(result.isSuccess, false);
+  if (!result.isSuccess) {
+    assert.equal(result.error.code, 'bad_request');
+    assert.equal(result.error.field, 'stopPosition');
+  }
 });
 
 test('an HTTP error becomes a failure result', async () => {

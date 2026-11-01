@@ -22,7 +22,7 @@ test('polling collapses consecutive identical snapshots', async () => {
   const realtime = fakeRealtime([a, a, b, b, b]);
 
   const got: SpiderResult<VehiclePositions>[] = [];
-  for await (const r of pollVehicles(realtime, ['t1'], { intervalMs: 0 })) {
+  for await (const r of pollVehicles(realtime, '2026-07-19', ['t1'], { intervalMs: 0 })) {
     got.push(r);
     if (got.length === 2) break;
   }
@@ -38,7 +38,7 @@ test('polling emits errors and re-emits recovery', async () => {
   const realtime = fakeRealtime([a, err, a]);
 
   const got: SpiderResult<VehiclePositions>[] = [];
-  for await (const r of pollVehicles(realtime, ['t1'], { intervalMs: 0 })) {
+  for await (const r of pollVehicles(realtime, '2026-07-19', ['t1'], { intervalMs: 0 })) {
     got.push(r);
     if (got.length === 3) break;
   }
@@ -52,7 +52,7 @@ test('an already-aborted signal yields nothing', async () => {
   controller.abort();
 
   const got: SpiderResult<VehiclePositions>[] = [];
-  for await (const r of pollVehicles(realtime, ['t1'], { intervalMs: 0, signal: controller.signal })) {
+  for await (const r of pollVehicles(realtime, '2026-07-19', ['t1'], { intervalMs: 0, signal: controller.signal })) {
     got.push(r);
   }
 

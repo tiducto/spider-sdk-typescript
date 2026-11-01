@@ -6,6 +6,8 @@ export type { DepartureBoard } from './DepartureBoard.ts';
 export type { DeparturesRequest } from './DeparturesRequest.ts';
 export type { DeparturesResponse } from './DeparturesResponse.ts';
 export type { ErrorResponse } from './ErrorResponse.ts';
+export type { EstimatedDelay } from './EstimatedDelay.ts';
+export type { EstimatedDelaysResponse } from './EstimatedDelaysResponse.ts';
 export type { Geometry } from './Geometry.ts';
 export type { InputField } from './InputField.ts';
 export type { Itinerary } from './Itinerary.ts';

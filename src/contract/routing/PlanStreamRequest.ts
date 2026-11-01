@@ -24,6 +24,6 @@ export interface PlanStreamRequest {
   before?: string;
   /** `pageInfo.endCursor` of a page, to fetch the page after it. Never with `before`. A `startCursor` here is a 400 `after is invalid`. */
   after?: string;
-  /** Delay-aware planning level; omitted or null plans on the timetable alone. */
+  /** Delay-aware planning level: each leg's arrival is planned with its `typicalArrivalDelay` at this level. Boarding keeps the scheduled departure, and a trip with live realtime uses its realtime times. Omitted or null plans on the timetable alone. */
   reliability?: Reliability;
 }

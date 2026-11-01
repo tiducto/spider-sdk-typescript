@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Tiducto Transit API — Realtime",
-    "version": "1.5",
+    "version": "1.6",
     "description": "GTFS-RT live data (vehicles, delays, alerts), poll-based and key-authenticated. Companion to routing and stops; the three share one pack version. A member that has no value is absent, never null. A GTFS-RT enum value the decoder doesn't recognise is omitted. Every id in a response is feed-prefixed (`<feedId>:<id>`), exactly as routing's `gtfsId` and stop search return it, and an id in a request is used exactly as sent: a raw id, or one with another feed's prefix, is unknown. A query parameter not listed is a 400 `<name> is not allowed`, and a repeated one a 400 `<name> is invalid`. A method an operation doesn't take is a 405 `method_not_allowed`, `POST /realtime/v1/delays` included, and a path under `/realtime/v1/` that matches no operation is a 404 `not_found`. A response may come from a shared cache keyed by host, URL and `apikey`; such a response is not metered. Any other path that matches no operation, and every path of an environment without a realtime deployment, is the gateway's plain-text `404 Not Found`, outside every operation."
   },
   "servers": [
@@ -25,10 +25,20 @@
     "/realtime/v1/vehicles": {
       "get": {
         "summary": "Realtime Vehicles",
-        "description": "Live vehicle positions for the given trips, at most one per trip.\n- `tripIds` is required: 1 to 50 comma-separated trip ids, each used exactly as sent and counted as sent. Absent or empty is a 400 `tripIds is required`, a blank entry (as in `1:39822,` or a space) a 400 `tripIds is invalid`, more than 50 a 400 `tripIds is out of range`.\n- Ids are feed-prefixed (`<feedId>:<id>`), exactly as routing returns them; a raw id or another feed's id is unknown and listed in `missing`.\n- A query parameter not listed is a 400 `<name> is not allowed`, and a repeated one a 400 `<name> is invalid`.\n- The response carries `ETag`, `Cache-Control: public, max-age=<poll interval>, must-revalidate` and `Vary: apikey`; a request whose `If-None-Match` matches the `ETag` is a 304 without a body.",
+        "description": "Live vehicle positions for the given trips on one service date, at most one per trip.\n- `serviceDate` is required: the GTFS service date, ISO-8601 `YYYY-MM-DD`, the same value a plan leg's, departure's or trip's `serviceDate` carries. Absent or empty is a 400 `serviceDate is required`, and a value that is not an ISO date a 400 `serviceDate is invalid`.\n- A vehicle is returned only while it runs the trip on that service date, so a future date has none; each vehicle's `serviceDate` names the trip run it is on.\n- `tripIds` is required: 1 to 50 comma-separated trip ids, each used exactly as sent and counted as sent. Absent or empty is a 400 `tripIds is required`, a blank entry (as in `1:39822,` or a space) a 400 `tripIds is invalid`, more than 50 a 400 `tripIds is out of range`.\n- Ids are feed-prefixed (`<feedId>:<id>`), exactly as routing returns them; a raw id or another feed's id is unknown and listed in `missing`.\n- A query parameter not listed is a 400 `<name> is not allowed`, and a repeated one a 400 `<name> is invalid`.\n- The response carries `ETag`, `Cache-Control: public, max-age=<poll interval>, must-revalidate` and `Vary: apikey`; a request whose `If-None-Match` matches the `ETag` is a 304 without a body.",
         "operationId": "realtime_vehicles",
         "x-surface": "realtime",
         "parameters": [
+          {
+            "name": "serviceDate",
+            "in": "query",
+            "description": "GTFS service date, ISO-8601 `YYYY-MM-DD`: the same value a plan leg's, departure's or trip's `serviceDate` carries. A vehicle is returned only while it runs the trip on this service date, so a future date has none. Absent or empty is a 400 `serviceDate is required`, and a value that is not an ISO date `serviceDate is invalid`.",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "date"
+            }
+          },
           {
             "name": "tripIds",
             "in": "query",
@@ -41,7 +51,7 @@
         ],
         "responses": {
           "200": {
-            "description": "Positions found, plus feed freshness; a requested id with no live vehicle, an unknown one included, is listed in `missing`.",
+            "description": "Positions found for the requested service date, plus feed freshness; a requested id with no live vehicle on that service date, an unknown one included, is listed in `missing`.",
             "headers": {
               "ETag": {
                 "description": "The snapshot's entity tag; absent until the feed has reported.",
@@ -71,6 +81,7 @@
                   "vehicles": [
                     {
                       "tripId": "1:39822",
+                      "serviceDate": "2026-09-22",
                       "routeId": "1:L41D99",
                       "vehicleId": "1:7103",
                       "label": "7103",
@@ -117,7 +128,7 @@
             }
           },
           "400": {
-            "description": "`tripIds` absent or empty is `tripIds is required`, a blank entry `tripIds is invalid`, and more than 50 ids `tripIds is out of range`. A query parameter not listed is `<name> is not allowed`, and a repeated one `<name> is invalid`; `field` names it.",
+            "description": "`serviceDate` absent or empty is `serviceDate is required`, and not an ISO date `serviceDate is invalid`. `tripIds` absent or empty is `tripIds is required`, a blank entry `tripIds is invalid`, and more than 50 ids `tripIds is out of range`. A query parameter not listed is `<name> is not allowed`, and a repeated one `<name> is invalid`; `field` names it.",
             "content": {
               "application/json": {
                 "schema": {
@@ -202,7 +213,7 @@
     "/realtime/v1/vehicles/by-trip/{id}": {
       "get": {
         "summary": "Realtime Vehicle By Trip",
-        "description": "Live vehicle for a single trip. Always 200 with a freshness envelope; `vehicle` is absent when none is currently reporting, a normal state, never a 404.\n- Ids are feed-prefixed (`<feedId>:<id>`), exactly as routing returns them; a raw id or another feed's id is unknown: `vehicle` is absent for it.\n- A query parameter is a 400 `<name> is not allowed`.\n- The response carries `ETag`, `Cache-Control: public, max-age=<poll interval>, must-revalidate` and `Vary: apikey`; a request whose `If-None-Match` matches the `ETag` is a 304 without a body.",
+        "description": "Live vehicle for a single trip on one service date. Always 200 with a freshness envelope; `vehicle` is absent when none is currently reporting, a normal state, never a 404.\n- `serviceDate` is required: the GTFS service date, ISO-8601 `YYYY-MM-DD`, the same value a plan leg's, departure's or trip's `serviceDate` carries. Absent or empty is a 400 `serviceDate is required`, and a value that is not an ISO date a 400 `serviceDate is invalid`.\n- A vehicle is returned only while it runs the trip on that service date, so a future date has none; its `serviceDate` names the trip run it is on.\n- Ids are feed-prefixed (`<feedId>:<id>`), exactly as routing returns them; a raw id or another feed's id is unknown: `vehicle` is absent for it.\n- A query parameter not listed is a 400 `<name> is not allowed`, and a repeated one a 400 `<name> is invalid`.\n- The response carries `ETag`, `Cache-Control: public, max-age=<poll interval>, must-revalidate` and `Vary: apikey`; a request whose `If-None-Match` matches the `ETag` is a 304 without a body.",
         "operationId": "realtime_vehicle_by_trip",
         "x-surface": "realtime",
         "parameters": [
@@ -214,11 +225,21 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "name": "serviceDate",
+            "in": "query",
+            "description": "GTFS service date, ISO-8601 `YYYY-MM-DD`: the same value a plan leg's, departure's or trip's `serviceDate` carries. A vehicle is returned only while it runs the trip on this service date, so a future date has none. Absent or empty is a 400 `serviceDate is required`, and a value that is not an ISO date `serviceDate is invalid`.",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "date"
+            }
           }
         ],
         "responses": {
           "200": {
-            "description": "Feed freshness plus the live vehicle, when one is reporting; `vehicle` is absent for a trip with none or an unknown id, a normal state rather than an error.",
+            "description": "Feed freshness plus the live vehicle, when one is reporting for the trip on the requested service date; `vehicle` is absent for a trip with none or an unknown id, a normal state rather than an error.",
             "headers": {
               "ETag": {
                 "description": "The snapshot's entity tag; absent until the feed has reported.",
@@ -247,6 +268,7 @@
                 "example": {
                   "vehicle": {
                     "tripId": "1:39822",
+                    "serviceDate": "2026-09-22",
                     "routeId": "1:L41D99",
                     "vehicleId": "1:7103",
                     "label": "7103",
@@ -289,7 +311,7 @@
             }
           },
           "400": {
-            "description": "A query parameter not listed is `<name> is not allowed`, and a repeated one `<name> is invalid`; `field` names it.",
+            "description": "`serviceDate` absent or empty is `serviceDate is required`, and not an ISO date `serviceDate is invalid`. A query parameter not listed is `<name> is not allowed`, and a repeated one `<name> is invalid`; `field` names it.",
             "content": {
               "application/json": {
                 "schema": {
@@ -759,7 +781,7 @@
           },
           "missing": {
             "type": "array",
-            "description": "Requested trip ids with no live vehicle, exactly as sent.",
+            "description": "Requested trip ids with no live vehicle on the requested service date, exactly as sent.",
             "items": {
               "type": "string"
             }
@@ -785,7 +807,7 @@
         "properties": {
           "vehicle": {
             "$ref": "#/components/schemas/Vehicle",
-            "description": "The trip's live vehicle; absent when none is reporting, a normal state rather than an error."
+            "description": "The trip's live vehicle on the requested service date; absent when none is reporting, a normal state rather than an error."
           },
           "feedTimestamp": {
             "type": "integer",
@@ -805,6 +827,10 @@
         "properties": {
           "tripId": {
             "type": "string"
+          },
+          "serviceDate": {
+            "type": "string",
+            "description": "GTFS service date of the trip run the vehicle is on, ISO-8601 `YYYY-MM-DD`."
           },
           "routeId": {
             "type": "string"
@@ -865,6 +891,7 @@
         },
         "required": [
           "tripId",
+          "serviceDate",
           "latitude",
           "longitude"
         ]
@@ -909,7 +936,7 @@
       },
       "Delay": {
         "type": "object",
-        "description": "Live schedule deviation for one trip instance. A trip update without a start date applies to any requested service date; one with a start date applies to that date only. `tripId` and `routeId` are feed-prefixed (`<feedId>:<id>`).",
+        "description": "Live schedule deviation for one trip instance on the requested service date. `tripId` and `routeId` are feed-prefixed (`<feedId>:<id>`).",
         "properties": {
           "tripId": {
             "type": "string"
