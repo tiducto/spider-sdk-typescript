@@ -6,20 +6,21 @@ import { mockFetch } from './support.ts';
 test('vehicles maps positions, missing and freshness', async () => {
   const mock = mockFetch({
     json: {
-      vehicles: [{ tripId: '1:39822', latitude: 49.1, longitude: 16.6, occupancyStatus: 'FULL', timestamp: 1000 }],
+      vehicles: [{ tripId: '1:39822', serviceDate: '2026-07-19', latitude: 49.1, longitude: 16.6, occupancyStatus: 'FULL', timestamp: 1000 }],
       missing: ['1:39823'],
       feedTimestamp: 2000,
       staleSeconds: 5,
     },
   });
   const client = new SpiderClient('https://x', 'k', { fetch: mock.fetch });
-  const result = await client.realtime.vehicles(['1:39822', '1:39823']);
+  const result = await client.realtime.vehicles('2026-07-19', ['1:39822', '1:39823']);
 
-  assert.equal(mock.calls[0].url, 'https://x/realtime/v1/vehicles?tripIds=1%3A39822%2C1%3A39823');
+  assert.equal(mock.calls[0].url, 'https://x/realtime/v1/vehicles?serviceDate=2026-07-19&tripIds=1%3A39822%2C1%3A39823');
   assert.equal(mock.calls[0].headers.get('apikey'), 'k');
   if (!result.isSuccess) throw new Error(result.error.code);
   assert.equal(result.data.vehicles.length, 1);
   assert.equal(result.data.vehicles[0].tripId, '1:39822');
+  assert.equal(result.data.vehicles[0].serviceDate, '2026-07-19');
   assert.equal(result.data.vehicles[0].occupancy, 'FULL');
   assert.equal(result.data.vehicles[0].timestampEpochMs, 1_000_000);
   assert.deepEqual([...result.data.missing], ['1:39823']);
@@ -30,7 +31,7 @@ test('vehicles maps positions, missing and freshness', async () => {
 test('vehicles with no trip ids skips the request', async () => {
   const mock = mockFetch({ json: {} });
   const client = new SpiderClient('https://x', 'k', { fetch: mock.fetch });
-  const result = await client.realtime.vehicles([]);
+  const result = await client.realtime.vehicles('2026-07-19', []);
   assert.equal(mock.calls.length, 0);
   assert.equal(result.isSuccess, true);
   if (result.isSuccess) assert.equal(result.data.vehicles.length, 0);
@@ -39,8 +40,8 @@ test('vehicles with no trip ids skips the request', async () => {
 test('vehicleForTrip treats 404 as no vehicle reporting', async () => {
   const mock = mockFetch({ status: 404, text: 'not found' });
   const client = new SpiderClient('https://x', 'k', { fetch: mock.fetch });
-  const result = await client.realtime.vehicleForTrip('1:39822');
-  assert.equal(mock.calls[0].url, 'https://x/realtime/v1/vehicles/by-trip/1%3A39822');
+  const result = await client.realtime.vehicleForTrip('1:39822', '2026-07-19');
+  assert.equal(mock.calls[0].url, 'https://x/realtime/v1/vehicles/by-trip/1%3A39822?serviceDate=2026-07-19');
   if (!result.isSuccess) throw new Error(result.error.code);
   assert.equal(result.data.vehicle, null);
 });
@@ -52,7 +53,7 @@ test('vehicleForTrip fails a 404 whose body names a plan limit, and a plain 404 
   ] as const) {
     const mock = mockFetch({ status: 404, json: { error: code, message } });
     const client = new SpiderClient('https://x', 'k', { fetch: mock.fetch });
-    const result = await client.realtime.vehicleForTrip('1:39822');
+    const result = await client.realtime.vehicleForTrip('1:39822', '2026-07-19');
     assert.equal(result.isSuccess, false, code);
     if (!result.isSuccess) {
       assert.equal(result.error.code, code);
@@ -63,10 +64,43 @@ test('vehicleForTrip fails a 404 whose body names a plan limit, and a plain 404 
   }
   for (const reply of [{ status: 404, text: '' }, { status: 404, json: { error: 'not_found', message: 'no vehicle' } }]) {
     const client = new SpiderClient('https://x', 'k', { fetch: mockFetch(reply).fetch });
-    const result = await client.realtime.vehicleForTrip('1:39822');
+    const result = await client.realtime.vehicleForTrip('1:39822', '2026-07-19');
     if (!result.isSuccess) throw new Error(result.error.code);
     assert.equal(result.data.vehicle, null);
   }
+});
+
+test('vehicleForTrip sends the service date and maps the vehicle with its run', async () => {
+  const mock = mockFetch({
+    json: { vehicle: { tripId: '1:39822', serviceDate: '2026-07-19', latitude: 49.1, longitude: 16.6 }, feedTimestamp: 2000 },
+  });
+  const client = new SpiderClient('https://x', 'k', { fetch: mock.fetch });
+  const result = await client.realtime.vehicleForTrip('1:39822', '2026-07-19');
+
+  assert.equal(mock.calls[0].url, 'https://x/realtime/v1/vehicles/by-trip/1%3A39822?serviceDate=2026-07-19');
+  if (!result.isSuccess) throw new Error(result.error.code);
+  assert.equal(result.data.vehicle?.tripId, '1:39822');
+  assert.equal(result.data.vehicle?.serviceDate, '2026-07-19');
+});
+
+test('vehicles and vehicleForTrip reject a malformed service date as bad_request without a request', async () => {
+  const mock = mockFetch({ json: { vehicles: [], missing: [] } });
+  const client = new SpiderClient('https://x', 'k', { fetch: mock.fetch });
+
+  for (const serviceDate of ['20260719', '2026-02-30', '']) {
+    for (const result of [
+      await client.realtime.vehicles(serviceDate, ['1:39822']),
+      await client.realtime.vehicles(serviceDate, []),
+      await client.realtime.vehicleForTrip('1:39822', serviceDate),
+    ]) {
+      assert.equal(result.isSuccess, false, serviceDate);
+      if (!result.isSuccess) {
+        assert.equal(result.error.code, 'bad_request');
+        assert.equal(result.error.field, 'serviceDate');
+      }
+    }
+  }
+  assert.equal(mock.calls.length, 0);
 });
 
 test('delays gets one service date with deduplicated, sorted, untouched ids and maps the flat response', async () => {
@@ -190,7 +224,7 @@ test('vehicles rejects more than 50 trip ids without a request', async () => {
   const client = new SpiderClient('https://x', 'k', { fetch: mock.fetch });
   const ids = (n: number) => Array.from({ length: n }, (_, i) => `1:${i}`);
 
-  const result = await client.realtime.vehicles(ids(51));
+  const result = await client.realtime.vehicles('2026-07-19', ids(51));
   assert.equal(result.isSuccess, false);
   if (!result.isSuccess) {
     assert.equal(result.error.code, 'bad_request');
@@ -199,14 +233,14 @@ test('vehicles rejects more than 50 trip ids without a request', async () => {
   }
   assert.equal(mock.calls.length, 0);
 
-  await client.realtime.vehicles(ids(50));
+  await client.realtime.vehicles('2026-07-19', ids(50));
   assert.equal(mock.calls.length, 1);
 });
 
 test('a realtime 400 naming a field is bad_request on that field', async () => {
   const mock = mockFetch({ status: 400, text: 'tripIds is out of range' });
   const client = new SpiderClient('https://x', 'k', { fetch: mock.fetch });
-  const result = await client.realtime.vehicles(['1:39822']);
+  const result = await client.realtime.vehicles('2026-07-19', ['1:39822']);
   assert.equal(result.isSuccess, false);
   if (!result.isSuccess) {
     assert.equal(result.error.code, 'bad_request');

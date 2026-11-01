@@ -8,18 +8,20 @@ export interface PollOptions {
 
 export function pollVehicles(
   realtime: SpiderRealtime,
+  serviceDate: string,
   tripIds: readonly string[],
   options?: PollOptions,
 ): AsyncGenerator<SpiderResult<VehiclePositions>> {
-  return poll(options, () => realtime.vehicles(tripIds));
+  return poll(options, () => realtime.vehicles(serviceDate, tripIds));
 }
 
 export function pollVehicleForTrip(
   realtime: SpiderRealtime,
   tripId: string,
+  serviceDate: string,
   options?: PollOptions,
 ): AsyncGenerator<SpiderResult<LiveVehicleUpdate>> {
-  return poll(options, () => realtime.vehicleForTrip(tripId));
+  return poll(options, () => realtime.vehicleForTrip(tripId, serviceDate));
 }
 
 export function pollDelays(

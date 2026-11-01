@@ -14,11 +14,13 @@ import {
 } from './enums.ts';
 import type { Location, ViaLocation } from './location.ts';
 import { decodePolyline } from './polyline.ts';
-import { invalidServiceDate, serviceDateOf } from './serviceDate.ts';
+import { invalidServiceDate } from './serviceDate.ts';
 import type {
   DepartureBoard,
   DeparturesRequest,
   DeparturesResponse,
+  EstimatedDelay,
+  EstimatedDelaysResponse,
   Itinerary as ItineraryWire,
   Leg as LegWire,
   PlanLabeledLocationInput,
@@ -59,7 +61,7 @@ export interface Leg {
   readonly isRealtime: boolean;
   /** The realtime state of the leg's trip; `SCHEDULED` on a walk leg. */
   readonly realtimeState: RealtimeState;
-  /** GTFS service date this leg's trip runs on (ISO `YYYY-MM-DD`) — pass to realtime `delays` lookups; null on a walk leg. */
+  /** GTFS service date this leg's trip runs on (ISO `YYYY-MM-DD`) — pass it to {@link SpiderRouting.trip}, {@link SpiderRouting.estimatedDelays} and realtime `delays` and `vehicles`; null on a walk leg. */
   readonly serviceDate: string | null;
   /** The stop's name; `Origin` or `Destination` for a coordinate. */
   readonly fromName: string;
@@ -175,11 +177,11 @@ export interface Departure {
   readonly realtimeTimeEpochMs: number;
   readonly isRealtime: boolean;
   readonly realtimeState: RealtimeState;
-  /** Typical (median) delay in seconds at this stop for this trip on its service date's day type; null when there is no history. */
+  /** Typical delay in seconds at this stop at the requested `reliability`; null when no reliability is passed, the trip has live realtime, or there is no history. */
   readonly typicalDelaySeconds: number | null;
   readonly headsign: string | null;
   readonly tripGtfsId: string;
-  /** GTFS service date the trip runs on (ISO `YYYY-MM-DD`) — pass it to {@link SpiderRouting.trip} and realtime `delays`. */
+  /** GTFS service date the trip runs on (ISO `YYYY-MM-DD`) — pass it to {@link SpiderRouting.trip}, {@link SpiderRouting.estimatedDelays} and realtime `delays` and `vehicles`. */
   readonly serviceDate: string;
   readonly routeGtfsId: string;
   readonly routeShortName: string | null;
@@ -207,7 +209,7 @@ export interface TripStop {
   readonly realtimeArrivalEpochMs: number;
   readonly realtimeDepartureEpochMs: number;
   readonly isRealtime: boolean;
-  /** Typical (median) delay in seconds at this stop for this trip on its service date's day type; null when there is no history. */
+  /** Typical delay in seconds at this stop at the requested `reliability`; null when no reliability is passed, the trip has live realtime, or there is no history. */
   readonly typicalDelaySeconds: number | null;
   readonly wheelchairBoarding: WheelchairBoarding | null;
   readonly platformCode: string | null;
@@ -220,8 +222,8 @@ export interface TripStop {
 
 export interface TripDetails {
   readonly gtfsId: string;
-  /** GTFS service date of this trip instance (ISO `YYYY-MM-DD`); null when the trip has no stop times on it. */
-  readonly serviceDate: string | null;
+  /** GTFS service date of this trip run (ISO `YYYY-MM-DD`): the date it was requested for. */
+  readonly serviceDate: string;
   readonly routeGtfsId: string;
   readonly routeShortName: string | null;
   readonly routeLongName: string | null;
@@ -236,6 +238,18 @@ export interface TripDetails {
   readonly wheelchairAccessible: WheelchairBoarding | null;
   readonly stops: readonly TripStop[];
   readonly geometry: readonly LatLon[];
+}
+
+/**
+ * Result of {@link SpiderRouting.estimatedDelays}: one stop's delay history, in seconds, per {@link Reliability} level.
+ * History only, so live realtime never changes them, and they are present for a live trip whose `typicalDelaySeconds`
+ * is null. For a trip without live realtime they equal {@link SpiderRouting.trip}'s `typicalDelaySeconds` at that
+ * level wherever that is not null. A level with no shift is 0.
+ */
+export interface EstimatedDelays {
+  readonly standardSeconds: number;
+  readonly safeSeconds: number;
+  readonly verySafeSeconds: number;
 }
 
 export interface PlanOptions {
@@ -296,12 +310,15 @@ export interface DeparturesOptions {
   readonly startTime?: number | Date;
   /** How far ahead to look, in seconds: above 0, up to 86400 (24 h, the default). */
   readonly timeRangeSeconds?: number;
+  /** The level {@link Departure.typicalDelaySeconds} is given at. Undefined = none, and it is null. */
+  readonly reliability?: Reliability;
 }
 
 const PLAN_PATH = '/routing/v1/plan';
 const PLAN_STREAM_PATH = '/routing/v1/plan-stream';
 const DEPARTURES_PATH = '/routing/v1/departures';
 const TRIP_PATH = '/routing/v1/trip';
+const ESTIMATED_DELAYS_PATH = '/routing/v1/estimated-delays';
 const NO_CURSOR = 'NoCursor';
 
 const DEFAULT_SEARCH_WINDOW_MINUTES = 60;
@@ -504,6 +521,7 @@ export class SpiderRouting {
         numberOfDepartures,
         startTime: options?.startTime != null ? Math.floor(toEpochMs(options.startTime) / 1000) : undefined,
         timeRange,
+        reliability: options?.reliability,
       };
       const stop = (await this.transport.postJson<DeparturesResponse>(DEPARTURES_PATH, body)).stop;
       if (stop == null) {
@@ -515,17 +533,41 @@ export class SpiderRouting {
     }
   }
 
-  /** One trip on one service date (ISO `YYYY-MM-DD`, e.g. a {@link Departure.serviceDate}); undefined = today. */
-  async trip(tripId: string, serviceDate?: string): Promise<SpiderResult<TripDetails>> {
-    const invalid = serviceDate != null ? invalidServiceDate(serviceDate) : null;
+  /**
+   * One trip run: the trip on one service date (ISO `YYYY-MM-DD`, a {@link Leg.serviceDate} or
+   * {@link Departure.serviceDate}). `reliability` is the level {@link TripStop.typicalDelaySeconds} is given at;
+   * undefined = none, and it is null. A malformed date fails as `bad_request` without a request.
+   */
+  async trip(tripId: string, serviceDate: string, reliability?: Reliability): Promise<SpiderResult<TripDetails>> {
+    const invalid = invalidServiceDate(serviceDate);
     if (invalid != null) return failure(invalid);
     try {
-      const body: TripRequest = { id: tripId, serviceDate };
+      const body: TripRequest = { id: tripId, serviceDate, reliability };
       const trip = (await this.transport.postJson<TripResponse>(TRIP_PATH, body)).trip;
       if (trip == null) {
         throw new TransportError('no_data', `routing returned no trip for id=${tripId}`);
       }
-      return success(mapTrip(trip));
+      return success(mapTrip(trip, serviceDate));
+    } catch (e) {
+      return failure(toSpiderError(e));
+    }
+  }
+
+  /**
+   * The delay history at one stop of one trip run: `serviceDate` as for {@link trip}, `stopPosition` a
+   * {@link TripStop.stopPosition}. Null (a success) for an unknown trip, a stop position not on the trip, or no
+   * history. A malformed date fails as `bad_request` without a request.
+   */
+  async estimatedDelays(tripId: string, serviceDate: string, stopPosition: number): Promise<SpiderResult<EstimatedDelays | null>> {
+    const invalid = invalidServiceDate(serviceDate);
+    if (invalid != null) return failure(invalid);
+    try {
+      const dto = await this.transport.getJson<EstimatedDelaysResponse>(ESTIMATED_DELAYS_PATH, {
+        tripId,
+        serviceDate,
+        stopPosition: String(stopPosition),
+      });
+      return success(mapEstimatedDelays(dto));
     } catch (e) {
       return failure(toSpiderError(e));
     }
@@ -799,7 +841,7 @@ function mapDepartures(stop: DepartureBoard): Departure[] {
       typicalDelaySeconds: st.typicalDelay ?? null,
       headsign: st.headsign ?? null,
       tripGtfsId: st.trip.gtfsId,
-      serviceDate: serviceDateOf(st.serviceDay),
+      serviceDate: st.serviceDate,
       routeGtfsId: route.gtfsId,
       routeShortName: route.shortName ?? null,
       routeLongName: route.longName ?? null,
@@ -814,8 +856,7 @@ function mapDepartures(stop: DepartureBoard): Departure[] {
   });
 }
 
-function mapTrip(trip: TripTimetable): TripDetails {
-  const first = trip.stoptimesForDate[0];
+function mapTrip(trip: TripTimetable, serviceDate: string): TripDetails {
   const geometry = trip.tripGeometry;
   const stops: TripStop[] = trip.stoptimesForDate.map((st) => {
     const s = st.stop;
@@ -840,7 +881,7 @@ function mapTrip(trip: TripTimetable): TripDetails {
   });
   return {
     gtfsId: trip.gtfsId,
-    serviceDate: first != null ? serviceDateOf(first.serviceDay) : null,
+    serviceDate,
     routeGtfsId: trip.route.gtfsId,
     routeShortName: trip.route.shortName ?? null,
     routeLongName: trip.route.longName ?? null,
@@ -854,4 +895,16 @@ function mapTrip(trip: TripTimetable): TripDetails {
     stops,
     geometry: geometry != null ? decodePolyline(geometry.points) : [],
   };
+}
+
+// Entries are keyed by their level, not their position; a missing level is a malformed body.
+function mapEstimatedDelays(dto: EstimatedDelaysResponse): EstimatedDelays | null {
+  const entries: unknown = dto.estimatedDelays;
+  if (entries === null) return null;
+  const at = (level: Reliability): number => {
+    const delay = Array.isArray(entries) ? (entries as EstimatedDelay[]).find((e) => e?.reliability === level)?.delay : undefined;
+    if (typeof delay !== 'number') throw new DecodingError(`failed to decode GET ${ESTIMATED_DELAYS_PATH}: no ${level} delay`);
+    return delay;
+  };
+  return { standardSeconds: at('STANDARD'), safeSeconds: at('SAFE'), verySafeSeconds: at('VERY_SAFE') };
 }

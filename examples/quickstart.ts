@@ -17,7 +17,7 @@ export async function handleResult(client: SpiderClient) {
   }
 }
 
-export async function otherSurfaces(client: SpiderClient, tripId: string) {
+export async function otherSurfaces(client: SpiderClient, tripId: string, serviceDate: string) {
   await client.stops.search({ name: 'central' })
-  await client.realtime.vehicleForTrip(tripId)
+  await client.realtime.vehicleForTrip(tripId, serviceDate)
 }

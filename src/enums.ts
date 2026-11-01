@@ -57,7 +57,7 @@ export type RoutingErrorCode =
 
 export type InputField = 'DATE_TIME' | 'FROM' | 'TO' | 'VIA' | 'UNKNOWN';
 
-/** Delay-aware planning level: arrivals are planned with the typical delay at the median (`STANDARD`), 70th (`SAFE`) or 90th (`VERY_SAFE`) percentile. */
+/** Delay level, for planning (`plan`) and for `typicalDelaySeconds` (`departures`, `trip`): the p50 (`STANDARD`), p70 (`SAFE`) or p90 (`VERY_SAFE`) of the trip's recorded delay. */
 export type Reliability = 'STANDARD' | 'SAFE' | 'VERY_SAFE';
 
 type Known<T extends string> = Record<Exclude<T, 'UNKNOWN'>, true>;

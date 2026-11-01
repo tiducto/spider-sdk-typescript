@@ -11,8 +11,8 @@ export function poll(client: SpiderClient, serviceDate: string, tripIds: string[
   }, 15_000)
 }
 
-export async function pollHelper(client: SpiderClient, tripIds: string[], updateBoard: (data: unknown) => void) {
-  for await (const result of pollVehicles(client.realtime, tripIds)) {
+export async function pollHelper(client: SpiderClient, serviceDate: string, tripIds: string[], updateBoard: (data: unknown) => void) {
+  for await (const result of pollVehicles(client.realtime, serviceDate, tripIds)) {
     if (result.isSuccess) {
       updateBoard(result.data)
     } else {
@@ -21,8 +21,8 @@ export async function pollHelper(client: SpiderClient, tripIds: string[], update
   }
 }
 
-export async function vehicles(client: SpiderClient, tripIds: string[]) {
-  const result = await client.realtime.vehicles(tripIds)
+export async function vehicles(client: SpiderClient, serviceDate: string, tripIds: string[]) {
+  const result = await client.realtime.vehicles(serviceDate, tripIds)
   if (result.isSuccess) {
     for (const vehicle of result.data.vehicles) {
       console.log(`${vehicle.tripId} at ${vehicle.latitude}, ${vehicle.longitude}`)
@@ -32,8 +32,8 @@ export async function vehicles(client: SpiderClient, tripIds: string[]) {
   }
 }
 
-export async function vehicleForTrip(client: SpiderClient, tripId: string) {
-  const result = await client.realtime.vehicleForTrip(tripId)
+export async function vehicleForTrip(client: SpiderClient, tripId: string, serviceDate: string) {
+  const result = await client.realtime.vehicleForTrip(tripId, serviceDate)
   if (result.isSuccess) {
     const vehicle = result.data.vehicle
     if (vehicle === null) {
