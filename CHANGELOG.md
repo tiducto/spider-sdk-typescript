@@ -1,6 +1,6 @@
 # Changelog
 
-## 1.6.0
+## 1.6.0 — 2026-11-02
 
 Targets Spider API contract 1.6.
 
