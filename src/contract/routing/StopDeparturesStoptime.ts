@@ -5,6 +5,8 @@ import type { StopDeparturesTrip } from './StopDeparturesTrip.ts';
 export interface StopDeparturesStoptime {
   /** Unix seconds at the start of the trip's service day; it plus a seconds field gives that time as Unix seconds. */
   serviceDay: number;
+  /** The GTFS service date of the departure's trip, `YYYY-MM-DD`, as `Leg.serviceDate`. For a departure past 24:00 of its service day, it is the day before the departure's calendar date. */
+  serviceDate: string;
   /** Seconds after `serviceDay`. */
   scheduledDeparture: number;
   /** Seconds after `serviceDay`, realtime merged in; the schedule when there is none. */
@@ -12,7 +14,7 @@ export interface StopDeparturesStoptime {
   /** True when `realtimeDeparture` comes from realtime. */
   realtime: boolean;
   realtimeState: RealtimeState;
-  /** The trip's usual delay at this stop in seconds: the median (p50) recorded on the service date's day type, from the environment's realtime history, never below 0 and never decreasing along the trip's pattern. Null when the trip has live realtime or there is no history. */
+  /** Seconds of delay at the requested `reliability`: that level's percentile of the trip's recorded delay at this stop on the service date's day type, from the environment's realtime history. Never below 0. At each level, no trip arrives at a stop, delay applied, before an earlier trip of the same pattern does. Null when `reliability` is omitted, when the trip has live realtime, a canceled trip included, or when there is no history. */
   typicalDelay: number | null;
   /** Null when the feed has none. */
   headsign: string | null;
