@@ -90,3 +90,12 @@ test('realtime wire types match realtime-openapi', () => {
     ['InformedEntity', 'InformedEntityDtoWire'],
   ]);
 });
+
+test('places wire types match places-openapi', () => {
+  checkPins('places.ts', 'places-openapi.json', [
+    ['PlaceSearchResponse', 'PlaceSearchResponseWire'],
+    ['PlaceHit', 'PlaceHitWire'],
+  ]);
+  // The error body is shared across surfaces; places decodes it through the same type stops does.
+  checkPins('stops.ts', 'places-openapi.json', [['ErrorResponse', 'ErrorResponseWire']]);
+});

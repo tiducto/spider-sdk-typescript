@@ -12,6 +12,7 @@ export type {
   RoutingErrorCode,
   InputField,
   Reliability,
+  PlaceType,
 } from './enums.ts';
 export { SpiderRouting } from './routing.ts';
 export type {
@@ -33,6 +34,8 @@ export type {
 } from './routing.ts';
 export { SpiderStops } from './stops.ts';
 export type { Stop, StopFilter, GeoPoint, GeoBoundingBox } from './stops.ts';
+export { SpiderPlaces } from './places.ts';
+export type { PlaceHit, PlaceSearchOptions } from './places.ts';
 export { SpiderRealtime, delayFor } from './realtime.ts';
 export type {
   FeedFreshness,

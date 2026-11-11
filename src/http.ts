@@ -17,6 +17,7 @@ export interface SpiderClientOptions {
   readonly timeoutMs?: number;
   readonly routing?: FeatureOptions;
   readonly stops?: FeatureOptions;
+  readonly places?: FeatureOptions;
   readonly realtime?: FeatureOptions;
 }
 
