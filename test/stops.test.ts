@@ -27,7 +27,6 @@ test('search builds the query and filter expression and maps hits', async () => 
   assert.equal(result.data[0].district, null);
   assert.deepEqual(result.data[0].modes, []);
   assert.equal(result.data[0].code, null);
-  assert.equal(result.data[0].locationType, null);
   assert.equal(result.data[0].wheelchairBoarding, null);
 });
 
@@ -164,12 +163,12 @@ test('search filters by modes (any of), ignoring UNKNOWN', async () => {
   assert.equal('filter' in JSON.parse(mock.calls[1].body), false);
 });
 
-test('a stop carries its code, kind, accessibility and modes, with unknown values as UNKNOWN', async () => {
+test('a stop carries its code, accessibility and modes, with unknown values as UNKNOWN', async () => {
   const mock = mockFetch({
     json: {
       hits: [
-        { gtfsId: '1:S', name: 'Nádraží', code: '12', locationType: 1, wheelchairBoarding: 1, modes: ['BUS', 'RAIL', 'HOVERCRAFT'] },
-        { gtfsId: '1:T', name: 'Točna', locationType: 0, wheelchairBoarding: 2 },
+        { gtfsId: '1:S', name: 'Nádraží', code: '12', wheelchairBoarding: 1, modes: ['BUS', 'RAIL', 'HOVERCRAFT'] },
+        { gtfsId: '1:T', name: 'Točna', wheelchairBoarding: 2 },
         { gtfsId: '1:U', name: 'Úvoz', wheelchairBoarding: 7 },
       ],
       query: '',
@@ -183,9 +182,7 @@ test('a stop carries its code, kind, accessibility and modes, with unknown value
   const [station, stop, odd] = result.data;
   assert.deepEqual(station.modes, ['BUS', 'RAIL', 'UNKNOWN']);
   assert.equal(station.code, '12');
-  assert.equal(station.locationType, 1);
   assert.equal(station.wheelchairBoarding, 'POSSIBLE');
-  assert.equal(stop.locationType, 0);
   assert.equal(stop.wheelchairBoarding, 'NOT_POSSIBLE');
   assert.equal(odd.wheelchairBoarding, 'UNKNOWN');
 });

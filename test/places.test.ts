@@ -5,7 +5,7 @@ import { CONTRACT_VERSION } from '../src/contract.ts';
 import { mockFetch } from './support.ts';
 
 test('search sends q and the default limit 10 as a GET, with no location', async () => {
-  const mock = mockFetch({ json: { hits: [] } });
+  const mock = mockFetch({ json: { hits: [], query: 'x' } });
   const client = new SpiderClient('https://brno.api.tiducto.eu', 'k', { fetch: mock.fetch });
 
   const result = await client.places.search('Vaňkovka');
@@ -23,7 +23,7 @@ test('search sends q and the default limit 10 as a GET, with no location', async
 });
 
 test('search sends a location as latitude and longitude and encodes diacritics', async () => {
-  const mock = mockFetch({ json: { hits: [] } });
+  const mock = mockFetch({ json: { hits: [], query: 'x' } });
   const client = new SpiderClient('https://x', 'k', { fetch: mock.fetch });
 
   await client.places.search('Údolní 53', { near: { lat: 49.1951, lng: 16.6068 }, limit: 5 });
@@ -51,6 +51,7 @@ test('hits map with their type, category, admin labels and distance; absent memb
         { id: 'ruian-2', type: 'street', name: 'Údolní', lat: 49.19, lon: 16.59, category: 'street' },
         { id: 'ruian-3', type: 'place', name: 'Brno', lat: 49.19, lon: 16.6, category: 'municipality' },
       ],
+      query: 'brno',
     },
   });
   const client = new SpiderClient('https://x', 'k', { fetch: mock.fetch });
@@ -72,6 +73,7 @@ test('hits map with their type, category, admin labels and distance; absent memb
     city: 'Brno',
     suburb: 'Brno-střed',
     distance: 670,
+    stop: null,
   });
   const poi = result.data[1];
   assert.equal(poi.category, 'mall');
@@ -80,10 +82,51 @@ test('hits map with their type, category, admin labels and distance; absent memb
   assert.equal(poi.suburb, null);
 });
 
+test('a stop hit carries its stop, mapped as stop search maps it; other types carry none', async () => {
+  const mock = mockFetch({
+    json: {
+      hits: [
+        {
+          id: '1:U1234Z1', type: 'stop', gtfsId: '1:U1234Z1', name: 'Hlavní nádraží', code: '1', wheelchairBoarding: 1,
+          modes: ['TRAM', 'BUS', 'HOVERCRAFT'], lat: 49.190612, lon: 16.612951, city: 'Brno', distance: 670,
+        },
+        { id: '1:U9Z1', type: 'stop', gtfsId: '1:U9Z1', name: 'Točna', lat: 49.2, lon: 16.6 },
+        { id: 'osm-w29239083', type: 'poi', name: 'Vaňkovka', lat: 49.18904, lon: 16.614627, category: 'mall' },
+      ],
+      query: 'hlavni',
+    },
+  });
+  const client = new SpiderClient('https://x', 'k', { fetch: mock.fetch });
+
+  const result = await client.places.search('hlavni');
+
+  if (!result.isSuccess) throw new Error(result.error.code);
+  const [stopHit, bareStop, poi] = result.data;
+  assert.deepEqual(stopHit.stop, {
+    gtfsId: '1:U1234Z1',
+    name: 'Hlavní nádraží',
+    code: '1',
+    wheelchairBoarding: 'POSSIBLE',
+    lat: 49.190612,
+    lon: 16.612951,
+    country: null,
+    region: null,
+    district: null,
+    city: 'Brno',
+    suburb: null,
+    modes: ['TRAM', 'BUS', 'UNKNOWN'],
+  });
+  assert.equal(bareStop.stop?.code, null);
+  assert.equal(bareStop.stop?.wheelchairBoarding, null);
+  assert.deepEqual(bareStop.stop?.modes, []);
+  assert.equal(poi.stop, null);
+});
+
 test('an unknown type decodes to UNKNOWN and unknown keys are ignored', async () => {
   const mock = mockFetch({
     json: {
       hits: [{ id: 'x-1', type: 'district', name: 'Žabovřesky', lat: 49.2, lon: 16.57, rank: 3, extra: { a: 1 } }],
+      query: 'Žabovřesky',
       took: 4,
     },
   });
@@ -98,7 +141,7 @@ test('an unknown type decodes to UNKNOWN and unknown keys are ignored', async ()
 });
 
 test('search rejects a limit outside 1–20 as bad_request without a request', async () => {
-  const mock = mockFetch({ json: { hits: [] } });
+  const mock = mockFetch({ json: { hits: [], query: 'x' } });
   const client = new SpiderClient('https://x', 'k', { fetch: mock.fetch });
 
   for (const limit of [0, 21, 2.5, Number.NaN]) {
@@ -146,7 +189,7 @@ test('a 401 and a 429 map to unauthorized and rate_limited', async () => {
 
 test('places retries a 5xx when its surface enables autoRetry', async () => {
   let n = 0;
-  const mock = mockFetch(() => (++n === 1 ? { status: 503, text: 'busy', headers: { 'retry-after': '0' } } : { json: { hits: [] } }));
+  const mock = mockFetch(() => (++n === 1 ? { status: 503, text: 'busy', headers: { 'retry-after': '0' } } : { json: { hits: [], query: 'x' } }));
   const client = new SpiderClient('https://x', 'k', { fetch: mock.fetch, places: { autoRetry: { maxAttempts: 2 } } });
 
   const result = await client.places.search('Brno');

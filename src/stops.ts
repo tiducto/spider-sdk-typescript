@@ -10,8 +10,6 @@ export interface Stop {
   readonly name: string;
   /** Short public code riders know the stop by (GTFS `stop_code`). */
   readonly code: string | null;
-  /** GTFS `location_type`: 0 a stop or platform, 1 a station (its platforms folded into it); null means a stop. */
-  readonly locationType: number | null;
   readonly wheelchairBoarding: WheelchairBoarding | null;
   readonly lat: number;
   readonly lon: number;
@@ -158,12 +156,12 @@ function extractStopError(raw: string): string {
   return raw.slice(0, 300);
 }
 
-function toStop(hit: StopHitWire): Stop {
+/** Maps a stop's wire members, as stop search and a place search stop hit both carry them. */
+export function toStop(hit: StopMembersWire): Stop {
   return {
     gtfsId: hit.gtfsId,
     name: hit.name,
     code: hit.code ?? null,
-    locationType: hit.locationType ?? null,
     wheelchairBoarding: wheelchairFromGtfs(hit.wheelchairBoarding),
     lat: hit.lat,
     lon: hit.lon,
@@ -194,11 +192,13 @@ interface ErrorResponseWire {
   field?: string;
 }
 
+/** The members of a stop search hit that make a `Stop`. */
+export type StopMembersWire = Omit<StopHitWire, '_geoDistance'>;
+
 interface StopHitWire {
   gtfsId: string;
   name: string;
   code?: string;
-  locationType?: number;
   wheelchairBoarding?: number;
   modes?: string[];
   lat: number;
