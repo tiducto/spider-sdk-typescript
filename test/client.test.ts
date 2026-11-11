@@ -6,11 +6,12 @@ import type { FetchLike } from '../src/http.ts';
 import { CONTRACT_VERSION } from '../src/contract.ts';
 import { mockFetch } from './support.ts';
 
-test('exposes the three surfaces and the contract version', () => {
+test('exposes the four surfaces and the contract version', () => {
   const client = new SpiderClient('https://x', 'k');
   assert.equal(client.contractVersion, CONTRACT_VERSION);
   assert.ok(client.routing);
   assert.ok(client.stops);
+  assert.ok(client.places);
   assert.ok(client.realtime);
 });
 
@@ -65,6 +66,7 @@ test('a plan-limit refusal reaches every surface as its own code', async () => {
       trip: () => client.routing.trip('1:T', '2026-09-30'),
       estimatedDelays: () => client.routing.estimatedDelays('1:T', '2026-09-30', 0),
       stopSearch: () => client.stops.search({ name: 'x' }),
+      placeSearch: () => client.places.search('xx'),
       vehicles: () => client.realtime.vehicles('2026-09-30', ['1:T']),
       vehicleForTrip: () => client.realtime.vehicleForTrip('1:T', '2026-09-30'),
       delays: () => client.realtime.delays('2026-09-30', ['1:T']),

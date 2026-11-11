@@ -8,13 +8,14 @@ import {
   bikesAllowedFromWire,
   inputFieldFromWire,
   occupancyFromWire,
+  placeTypeFromWire,
   realtimeStateFromWire,
   routingErrorCodeFromWire,
   transitModeFromWire,
   wheelchairFromGtfs,
   wheelchairFromWire,
 } from '../src/enums.ts';
-import type { BikesAllowed, InputField, RealtimeState, Reliability, RoutingErrorCode, TransitMode, WheelchairBoarding } from '../src/index.ts';
+import type { BikesAllowed, InputField, PlaceType, RealtimeState, Reliability, RoutingErrorCode, TransitMode, WheelchairBoarding } from '../src/index.ts';
 
 const ROUTING_CONTRACT = path.join(path.dirname(path.dirname(fileURLToPath(import.meta.url))), 'src/contract/routing');
 
@@ -82,6 +83,12 @@ test('stop-search wheelchair codes decode like the routing enum', () => {
   assert.equal(wheelchairFromGtfs(3), 'UNKNOWN');
 });
 
+test('place types decode from their lower-case wire spelling, an unknown one to UNKNOWN', () => {
+  assert.deepEqual(['stop', 'address', 'street', 'place', 'poi'].map(placeTypeFromWire), ['STOP', 'ADDRESS', 'STREET', 'PLACE', 'POI']);
+  assert.equal(placeTypeFromWire('district'), 'UNKNOWN');
+  assert.equal(placeTypeFromWire('constructor'), 'UNKNOWN');
+});
+
 // Closed unions: these fail `npm run typecheck` if an enum type ever widens back to `string`.
 // @ts-expect-error not a TransitMode
 export const notAMode: TransitMode = 'HOVERCRAFT';
@@ -97,3 +104,5 @@ export const notALevel: Reliability = 'RISKY';
 export const notWheelchair: WheelchairBoarding = 'Possible';
 // @ts-expect-error wire spelling only
 export const notBikes: BikesAllowed = 'Allowed';
+// @ts-expect-error not a PlaceType
+export const notAPlaceType: PlaceType = 'DISTRICT';

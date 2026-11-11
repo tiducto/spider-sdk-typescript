@@ -3,6 +3,7 @@ import type { SpiderClientOptions, FeatureOptions, TransportOptions } from './ht
 import { CONTRACT_VERSION } from './contract.ts';
 import { SpiderRouting } from './routing.ts';
 import { SpiderStops } from './stops.ts';
+import { SpiderPlaces } from './places.ts';
 import { SpiderRealtime } from './realtime.ts';
 
 function transportFor(
@@ -18,6 +19,7 @@ function transportFor(
 export class SpiderClient {
   readonly routing: SpiderRouting;
   readonly stops: SpiderStops;
+  readonly places: SpiderPlaces;
   readonly realtime: SpiderRealtime;
   // A no-retry transport for connection-level operations (warmup). Shares the same fetch + origin
   // as the feature transports, so the connection it opens is pooled and reused by real calls.
@@ -28,6 +30,7 @@ export class SpiderClient {
     this.transport = transportFor(baseUrl, apiKey, base);
     this.routing = new SpiderRouting(transportFor(baseUrl, apiKey, base, options?.routing));
     this.stops = new SpiderStops(transportFor(baseUrl, apiKey, base, options?.stops));
+    this.places = new SpiderPlaces(transportFor(baseUrl, apiKey, base, options?.places));
     this.realtime = new SpiderRealtime(transportFor(baseUrl, apiKey, base, options?.realtime));
   }
 
@@ -39,7 +42,7 @@ export class SpiderClient {
    * Pre-warms the connection to the API host so the first real call doesn't pay for the cold
    * TLS/connection setup. Issues one best-effort `GET /ping`, authenticated with the client
    * apikey, through the SDK's own HTTP path; the connection it establishes joins the per-origin
-   * pool that trip planning, stop, and realtime calls reuse — so the ~0.6s cold handshake
+   * pool that trip planning, stop, place, and realtime calls reuse — so the ~0.6s cold handshake
    * (notably on mobile) is spent up front instead of on that first request.
    *
    * Call it once at app start, or when the app returns to the foreground. Safe to

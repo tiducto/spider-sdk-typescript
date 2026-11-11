@@ -1,0 +1,369 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Tiducto Transit API — Places",
+    "version": "1.7",
+    "description": "Place search over the environment's service area (stops, addresses, streets, municipalities and points of interest), key-authenticated. Companion to routing, stops and realtime; the four share one pack version. A member that has no value is absent, never null. `type` is an open set: new values may be added, and a client ignores a type it does not know. A stop's `id` is the value routing's `stopLocation.stopLocationId` takes. Addresses, streets and municipalities are from RÚIAN, the Czech register of addresses and territorial units (© ČÚZK, CC BY 4.0); points of interest are from OpenStreetMap (© OpenStreetMap contributors, ODbL); results carry those attribution obligations. A query parameter not listed is a 400 `<name> is not allowed`, and a repeated one a 400 `<name> is invalid`. A method an operation doesn't take is a 405 `method_not_allowed`. A path that matches no operation, and every path of an environment without places search, is the gateway's plain-text `404 Not Found`, outside every operation."
+  },
+  "servers": [
+    {
+      "url": "https://{env-slug}.api.tiducto.eu",
+      "description": "Your environment. Replace `{env-slug}` with your environment's slug.",
+      "variables": {
+        "env-slug": {
+          "default": "your-env-slug"
+        }
+      }
+    }
+  ],
+  "security": [
+    {
+      "apikey": []
+    }
+  ],
+  "paths": {
+    "/places/v1/search": {
+      "get": {
+        "summary": "Search Places",
+        "description": "Place search over the environment's service area: stops, addresses, streets, municipalities and their parts, city districts and points of interest.\n- `q` and `limit` are required; absent is a 400 `<name> is required`, and `q` empty after trimming whitespace is `q is required`.\n- `q` is 2 to 100 characters after trimming whitespace; shorter or longer is a 400 `q is out of range`.\n- `limit` is an integer from 1 to 20; not an integer is a 400 `limit is invalid`, outside 1 to 20 `limit is out of range`. Nothing is clamped.\n- `latitude` and `longitude` are optional, both or neither, in WGS84 degrees; one without the other is a 400 naming the absent one `<name> is required`, not a decimal `<name> is invalid`, and outside -90 to 90 or -180 to 180 `<name> is out of range`.\n- At most `limit` hits, best first: stops, then municipalities, districts and landmarks, then streets, then other points of interest and addresses. With `latitude` and `longitude` the nearest of equally good matches comes first and each hit carries `distance` in metres; without them distance plays no part.\n- Hits come only from the environment's service area.\n- A `q` with a digit lists individual addresses; without one, a street stands for its addresses.\n- Abbreviated and spelled-out forms find each other (`žel. st.` and `železniční stanice`), and text without diacritics matches text with them.\n- A stop's `id` is its feed-prefixed id, the value routing's `stopLocation.stopLocationId` takes; any other `id` is opaque.\n- Addresses, streets and municipalities are from RÚIAN, the Czech register of addresses and territorial units (© ČÚZK, CC BY 4.0); points of interest are from OpenStreetMap (© OpenStreetMap contributors, ODbL). Results carry those attribution obligations.\n- A member that has no value is absent from a hit, never null.\n- A query parameter not listed is a 400 `<name> is not allowed`, and a repeated one a 400 `<name> is invalid`. Another method is a 405 `method_not_allowed`.\n- The response carries `ETag`, `Cache-Control: private, max-age=300` and `Vary: apikey`; a request whose `If-None-Match` matches the `ETag` (RFC 9110 weak comparison) is a 304 without a body.",
+        "operationId": "places_search",
+        "x-surface": "places",
+        "parameters": [
+          {
+            "name": "q",
+            "in": "query",
+            "description": "Search text, 2 to 100 characters after trimming whitespace. Abbreviated and spelled-out forms find each other, and text without diacritics matches. With a digit, individual addresses are listed; without one, a street stands for its addresses. Absent or empty after trimming is a 400 `q is required`, and shorter or longer `q is out of range`.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Max hits to return, an integer from 1 to 20. Absent is a 400 `limit is required`, not an integer `limit is invalid`, and outside 1 to 20 `limit is out of range`; rejected, never clamped.",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 1.0,
+              "maximum": 20.0
+            }
+          },
+          {
+            "name": "latitude",
+            "in": "query",
+            "description": "WGS84 latitude in degrees, -90 to 90, with `longitude` or not at all; with both, a nearer hit ranks above an equally good farther one of the same kind and each hit carries `distance`. Present without `longitude` is a 400 `longitude is required`; not a decimal is `latitude is invalid`, and outside -90 to 90 `latitude is out of range`.",
+            "required": false,
+            "schema": {
+              "type": "number",
+              "format": "double",
+              "minimum": -90.0,
+              "maximum": 90.0
+            }
+          },
+          {
+            "name": "longitude",
+            "in": "query",
+            "description": "WGS84 longitude in degrees, -180 to 180, with `latitude` or not at all. Present without `latitude` is a 400 `latitude is required`; not a decimal is `longitude is invalid`, and outside -180 to 180 `longitude is out of range`.",
+            "required": false,
+            "schema": {
+              "type": "number",
+              "format": "double",
+              "minimum": -180.0,
+              "maximum": 180.0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "At most `limit` hits, best first. A better text match ranks higher; among equally good matches, stops come before other places. With `latitude` and `longitude`, the nearer of two equally good matches of the same kind comes first (distance is not compared between a stop and another place); without them, municipalities and landmarks come before streets, then other points of interest and addresses; addresses only when `q` holds a house number. Hits come only from the environment's service area.",
+            "headers": {
+              "ETag": {
+                "description": "The result's entity tag.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Cache-Control": {
+                "description": "`private, max-age=300`.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Vary": {
+                "description": "`apikey`: a private cache keys the response by host, URL and `apikey`.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlaceSearchResponse"
+                },
+                "example": {
+                  "hits": [
+                    {
+                      "id": "1:U1234Z1",
+                      "type": "stop",
+                      "name": "Hlavní nádraží",
+                      "lat": 49.190612,
+                      "lon": 16.612951,
+                      "country": "Česko",
+                      "region": "Jihomoravský kraj",
+                      "district": "okres Brno-město",
+                      "city": "Brno",
+                      "suburb": "Brno-střed",
+                      "distance": 670
+                    },
+                    {
+                      "id": "osm-w29239083",
+                      "type": "poi",
+                      "name": "Vaňkovka",
+                      "lat": 49.18904,
+                      "lon": 16.614627,
+                      "category": "mall",
+                      "country": "Česko",
+                      "region": "Jihomoravský kraj",
+                      "district": "okres Brno-město",
+                      "city": "Brno",
+                      "suburb": "Brno-střed",
+                      "distance": 882
+                    },
+                    {
+                      "id": "ruian-19153635",
+                      "type": "address",
+                      "name": "Údolní 244/53",
+                      "lat": 49.198361,
+                      "lon": 16.594827,
+                      "category": "building",
+                      "country": "Česko",
+                      "region": "Jihomoravský kraj",
+                      "district": "okres Brno-město",
+                      "city": "Brno",
+                      "suburb": "Brno-střed",
+                      "distance": 943
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "304": {
+            "description": "The result is unchanged: `If-None-Match` matches the current `ETag` under RFC 9110 weak comparison (`W/` tags, lists and `*` included). No body; `ETag`, `Cache-Control` and `Vary` as on a 200.",
+            "headers": {
+              "ETag": {
+                "description": "The result's entity tag.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Cache-Control": {
+                "description": "`private, max-age=300`.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Vary": {
+                "description": "`apikey`: a private cache keys the response by host, URL and `apikey`.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`q` or `limit` absent is `<name> is required`, and so is `q` empty after trimming; `q` shorter than 2 or longer than 100 characters is `q is out of range`; `limit` not an integer is `limit is invalid`, and outside 1 to 20 `limit is out of range`. `latitude` or `longitude` without the other is `<name> is required`, naming the absent one; not a decimal is `<name> is invalid`, and outside its range `<name> is out of range`. A query parameter not listed is `<name> is not allowed`, and a repeated one `<name> is invalid`; `field` names it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "The `apikey` header is missing (`key_missing`) or holds no valid key (`key_invalid`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The key is not allowed on this operation (`key_not_allowed`), or the agreement it belongs to is inactive (`agreement_inactive`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "The key's rate limit is reached (`rate_limited`).",
+            "headers": {
+              "Retry-After": {
+                "description": "Seconds until a request is admitted again.",
+                "schema": {
+                  "type": "integer"
+                }
+              },
+              "X-RateLimit-Limit": {
+                "description": "Requests the key may make per rate-limit window.",
+                "schema": {
+                  "type": "integer"
+                }
+              },
+              "X-RateLimit-Reset": {
+                "description": "Unix seconds at which the rate-limit window resets.",
+                "schema": {
+                  "type": "integer"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "description": "Another client error: 404 `not_found`, 405 `method_not_allowed`, 411 `length_required` (a body without a length) or 413 `payload_too_large`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "5XX": {
+            "description": "From Spider, an ErrorResponse: `internal_error`, `upstream_unavailable` or `upstream_timeout`. A network intermediary in front of Spider may answer a 5XX with a body that is not JSON.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "apikey": {
+        "type": "apiKey",
+        "in": "header",
+        "name": "apikey",
+        "description": "The raw key in an `apikey` header (not Authorization: Bearer)."
+      }
+    },
+    "schemas": {
+      "PlaceSearchResponse": {
+        "type": "object",
+        "description": "Search hits, at most `limit`, best first.",
+        "properties": {
+          "hits": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PlaceHit"
+            }
+          }
+        },
+        "required": [
+          "hits"
+        ]
+      },
+      "PlaceHit": {
+        "type": "object",
+        "description": "One place. A member that has no value is absent, never null. `country`, `region`, `district`, `city` and `suburb` are the admin areas the place lies in, derived the same way as a `StopHit`'s, so every hit is labelled alike.",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "For a `stop`, the stop's feed-prefixed id (`<feedId>:<id>`), the value routing's `stopLocation.stopLocationId` takes. For any other type, an opaque id, stable across searches."
+          },
+          "type": {
+            "type": "string",
+            "description": "What the place is: `stop`, `address`, `street`, `place` (a municipality) or `poi` (a point of interest). New values may be added; a client ignores a type it does not know."
+          },
+          "name": {
+            "type": "string",
+            "description": "Display name; a stop's is the operator's own."
+          },
+          "lat": {
+            "type": "number",
+            "format": "double",
+            "description": "Latitude in degrees."
+          },
+          "lon": {
+            "type": "number",
+            "format": "double",
+            "description": "Longitude in degrees."
+          },
+          "category": {
+            "type": "string",
+            "description": "What kind of place it is: for a `poi` e.g. `university`, `hospital`, `mall`, `cemetery`; for a `place` `municipality`; for an `address` `building`, or `recreational` for a recreational building; for a `street` `street`. Absent for a stop. New values may be added."
+          },
+          "country": {
+            "type": "string"
+          },
+          "region": {
+            "type": "string"
+          },
+          "district": {
+            "type": "string"
+          },
+          "city": {
+            "type": "string"
+          },
+          "suburb": {
+            "type": "string"
+          },
+          "distance": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Metres from `latitude`/`longitude`; present only when they were sent."
+          }
+        },
+        "required": [
+          "id",
+          "type",
+          "name",
+          "lat",
+          "lon"
+        ]
+      },
+      "ErrorResponse": {
+        "type": "object",
+        "description": "Error body: a stable machine-readable `code`, which names a state, and a human-readable `message`.",
+        "properties": {
+          "code": {
+            "type": "string",
+            "description": "One of `bad_request`, `key_missing`, `key_invalid`, `key_not_allowed`, `agreement_inactive`, `planning_limit_reached`, `not_found`, `method_not_allowed`, `length_required`, `payload_too_large`, `rate_limited`, `internal_error`, `upstream_unavailable`, `upstream_timeout`. New codes may be added."
+          },
+          "message": {
+            "type": "string",
+            "description": "For `bad_request`: `<field> is required|invalid|out of range|not allowed`, or `body is invalid` when the body is empty, not JSON or not an object."
+          },
+          "field": {
+            "type": "string",
+            "description": "Present only on a 400 that names one member: its dot path from the body root, array positions omitted, or the query parameter's name."
+          }
+        },
+        "required": [
+          "code",
+          "message"
+        ]
+      }
+    }
+  }
+}
