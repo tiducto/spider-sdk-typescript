@@ -34,8 +34,8 @@ export interface PlaceHit {
   readonly suburb: string | null;
   /** Metres from the search's `near` point; null when the search had none. */
   readonly distance: number | null;
-  /** For a `STOP`, the stop as stop search returns it; undefined for any other type. */
-  readonly stop?: Stop;
+  /** For a `STOP`, the stop as stop search returns it; null for any other type. */
+  readonly stop: Stop | null;
 }
 
 export interface PlaceSearchOptions {
@@ -81,7 +81,7 @@ export class SpiderPlaces {
 
 function toPlaceHit(hit: PlaceHitWire): PlaceHit {
   const gtfsId = hit.gtfsId;
-  const stop = hit.type === 'stop' && gtfsId != null ? toStop({ ...hit, gtfsId }) : undefined;
+  const stop = hit.type === 'stop' && gtfsId != null ? toStop({ ...hit, gtfsId }) : null;
   return {
     id: hit.id,
     type: placeTypeFromWire(hit.type),
@@ -95,7 +95,7 @@ function toPlaceHit(hit: PlaceHitWire): PlaceHit {
     city: hit.city ?? null,
     suburb: hit.suburb ?? null,
     distance: hit.distance ?? null,
-    ...(stop != null ? { stop } : {}),
+    stop,
   };
 }
 

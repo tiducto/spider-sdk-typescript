@@ -73,6 +73,7 @@ test('hits map with their type, category, admin labels and distance; absent memb
     city: 'Brno',
     suburb: 'Brno-střed',
     distance: 670,
+    stop: null,
   });
   const poi = result.data[1];
   assert.equal(poi.category, 'mall');
@@ -118,8 +119,7 @@ test('a stop hit carries its stop, mapped as stop search maps it; other types ca
   assert.equal(bareStop.stop?.code, null);
   assert.equal(bareStop.stop?.wheelchairBoarding, null);
   assert.deepEqual(bareStop.stop?.modes, []);
-  assert.equal(poi.stop, undefined);
-  assert.equal('stop' in poi, false);
+  assert.equal(poi.stop, null);
 });
 
 test('an unknown type decodes to UNKNOWN and unknown keys are ignored', async () => {

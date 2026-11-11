@@ -7,7 +7,7 @@ Targets Spider API contract 1.8.
 ### Added
 
 - **`PlaceHit.stop`**: a `STOP` hit carries its stop as a `Stop` (`gtfsId`, `name`, `code`, `wheelchairBoarding`,
-  `modes`, `lat`/`lon` and the admin labels), mapped exactly as stop search maps a hit; undefined for any other type.
+  `modes`, `lat`/`lon` and the admin labels), mapped exactly as stop search maps a hit; null for any other type.
 
 ### Removed
 
