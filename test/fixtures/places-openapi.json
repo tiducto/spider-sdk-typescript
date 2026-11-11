@@ -2,8 +2,8 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Tiducto Transit API — Places",
-    "version": "1.7",
-    "description": "Place search over the environment's service area (stops, addresses, streets, municipalities and points of interest), key-authenticated. Companion to routing, stops and realtime; the four share one pack version. A member that has no value is absent, never null. `type` is an open set: new values may be added, and a client ignores a type it does not know. A stop's `id` is the value routing's `stopLocation.stopLocationId` takes. Addresses, streets and municipalities are from RÚIAN, the Czech register of addresses and territorial units (© ČÚZK, CC BY 4.0); points of interest are from OpenStreetMap (© OpenStreetMap contributors, ODbL); results carry those attribution obligations. A query parameter not listed is a 400 `<name> is not allowed`, and a repeated one a 400 `<name> is invalid`. A method an operation doesn't take is a 405 `method_not_allowed`. A path that matches no operation, and every path of an environment without places search, is the gateway's plain-text `404 Not Found`, outside every operation."
+    "version": "1.8",
+    "description": "Place search over the environment's service area (stops, addresses, municipalities and points of interest), key-authenticated. Companion to routing, stops and realtime; the four share one pack version. A member that has no value is absent, never null. `type` is an open set: new values may be added, and a client ignores a type it does not know. A stop's `id` is the value routing's `stopLocation.stopLocationId` takes, and a stop carries the members of its stop search hit under the same names, `_geoDistance` excepted (here `distance`). `wheelchairBoarding` is the feed's GTFS integer code, and an unrecognised code passes through unchanged. Addresses and municipalities are from RÚIAN, the Czech register of addresses and territorial units (© ČÚZK, CC BY 4.0); points of interest are from OpenStreetMap (© OpenStreetMap contributors, ODbL); results carry those attribution obligations. A query parameter not listed is a 400 `<name> is not allowed`, and a repeated one a 400 `<name> is invalid`. A method an operation doesn't take is a 405 `method_not_allowed`. A path that matches no operation, and every path of an environment without places search, is the gateway's plain-text `404 Not Found`, outside every operation."
   },
   "servers": [
     {
@@ -25,14 +25,14 @@
     "/places/v1/search": {
       "get": {
         "summary": "Search Places",
-        "description": "Place search over the environment's service area: stops, addresses, streets, municipalities and their parts, city districts and points of interest.\n- `q` and `limit` are required; absent is a 400 `<name> is required`, and `q` empty after trimming whitespace is `q is required`.\n- `q` is 2 to 100 characters after trimming whitespace; shorter or longer is a 400 `q is out of range`.\n- `limit` is an integer from 1 to 20; not an integer is a 400 `limit is invalid`, outside 1 to 20 `limit is out of range`. Nothing is clamped.\n- `latitude` and `longitude` are optional, both or neither, in WGS84 degrees; one without the other is a 400 naming the absent one `<name> is required`, not a decimal `<name> is invalid`, and outside -90 to 90 or -180 to 180 `<name> is out of range`.\n- At most `limit` hits, best first: stops, then municipalities, districts and landmarks, then streets, then other points of interest and addresses. With `latitude` and `longitude` the nearest of equally good matches comes first and each hit carries `distance` in metres; without them distance plays no part.\n- Hits come only from the environment's service area.\n- A `q` with a digit lists individual addresses; without one, a street stands for its addresses.\n- Abbreviated and spelled-out forms find each other (`žel. st.` and `železniční stanice`), and text without diacritics matches text with them.\n- A stop's `id` is its feed-prefixed id, the value routing's `stopLocation.stopLocationId` takes; any other `id` is opaque.\n- Addresses, streets and municipalities are from RÚIAN, the Czech register of addresses and territorial units (© ČÚZK, CC BY 4.0); points of interest are from OpenStreetMap (© OpenStreetMap contributors, ODbL). Results carry those attribution obligations.\n- A member that has no value is absent from a hit, never null.\n- A query parameter not listed is a 400 `<name> is not allowed`, and a repeated one a 400 `<name> is invalid`. Another method is a 405 `method_not_allowed`.\n- The response carries `ETag`, `Cache-Control: private, max-age=300` and `Vary: apikey`; a request whose `If-None-Match` matches the `ETag` (RFC 9110 weak comparison) is a 304 without a body.",
+        "description": "Place search over the environment's service area: stops, addresses, municipalities and points of interest.\n- `q` and `limit` are required; absent is a 400 `<name> is required`, and `q` empty after trimming whitespace is `q is required`.\n- `q` is 2 to 100 characters after trimming whitespace; shorter or longer is a 400 `q is out of range`.\n- `limit` is an integer from 1 to 20; not an integer is a 400 `limit is invalid`, outside 1 to 20 `limit is out of range`. Nothing is clamped.\n- `latitude` and `longitude` are optional, both or neither, in WGS84 degrees; one without the other is a 400 naming the absent one `<name> is required`, not a decimal `<name> is invalid`, and outside -90 to 90 or -180 to 180 `<name> is out of range`.\n- At most `limit` hits, best first: stops, then municipalities and landmarks, then other points of interest and addresses. With `latitude` and `longitude` the nearest of equally good matches comes first and each hit carries `distance` in metres; without them distance plays no part.\n- Hits come only from the environment's service area.\n- A `q` with a digit lists individual addresses; without one, none.\n- Abbreviated and spelled-out forms find each other (`žel. st.` and `železniční stanice`), and text without diacritics matches text with them.\n- A stop's `id` is its feed-prefixed id, the value routing's `stopLocation.stopLocationId` takes; any other `id` is opaque.\n- A stop carries the members of its stop search hit under the same names, `_geoDistance` excepted (here `distance`): `gtfsId`, `code`, `wheelchairBoarding` and `modes` included, a station's platforms folded into it. Other types carry none of those four.\n- The response echoes the `q` searched as `query`, without its leading and trailing whitespace.\n- Addresses and municipalities are from RÚIAN, the Czech register of addresses and territorial units (© ČÚZK, CC BY 4.0); points of interest are from OpenStreetMap (© OpenStreetMap contributors, ODbL). Results carry those attribution obligations.\n- A member that has no value is absent from a hit, never null.\n- A query parameter not listed is a 400 `<name> is not allowed`, and a repeated one a 400 `<name> is invalid`. Another method is a 405 `method_not_allowed`.\n- The response carries `ETag`, `Cache-Control: private, max-age=300` and `Vary: apikey`; a request whose `If-None-Match` matches the `ETag` (RFC 9110 weak comparison) is a 304 without a body.",
         "operationId": "places_search",
         "x-surface": "places",
         "parameters": [
           {
             "name": "q",
             "in": "query",
-            "description": "Search text, 2 to 100 characters after trimming whitespace. Abbreviated and spelled-out forms find each other, and text without diacritics matches. With a digit, individual addresses are listed; without one, a street stands for its addresses. Absent or empty after trimming is a 400 `q is required`, and shorter or longer `q is out of range`.",
+            "description": "Search text, 2 to 100 characters after trimming whitespace. Abbreviated and spelled-out forms find each other, and text without diacritics matches. With a digit, individual addresses are listed; without one, none are. Absent or empty after trimming is a 400 `q is required`, and shorter or longer `q is out of range`.",
             "required": true,
             "schema": {
               "type": "string"
@@ -77,7 +77,7 @@
         ],
         "responses": {
           "200": {
-            "description": "At most `limit` hits, best first. A better text match ranks higher; among equally good matches, stops come before other places. With `latitude` and `longitude`, the nearer of two equally good matches of the same kind comes first (distance is not compared between a stop and another place); without them, municipalities and landmarks come before streets, then other points of interest and addresses; addresses only when `q` holds a house number. Hits come only from the environment's service area.",
+            "description": "At most `limit` hits, best first. A better text match ranks higher; among equally good matches, stops come before other places. With `latitude` and `longitude`, the nearer of two equally good matches of the same kind comes first (distance is not compared between a stop and another place); without them, municipalities and landmarks come before other points of interest and addresses; addresses only when `q` holds a house number. Hits come only from the environment's service area.",
             "headers": {
               "ETag": {
                 "description": "The result's entity tag.",
@@ -108,7 +108,14 @@
                     {
                       "id": "1:U1234Z1",
                       "type": "stop",
+                      "gtfsId": "1:U1234Z1",
                       "name": "Hlavní nádraží",
+                      "code": "1",
+                      "wheelchairBoarding": 1,
+                      "modes": [
+                        "TRAM",
+                        "BUS"
+                      ],
                       "lat": 49.190612,
                       "lon": 16.612951,
                       "country": "Česko",
@@ -146,7 +153,8 @@
                       "suburb": "Brno-střed",
                       "distance": 943
                     }
-                  ]
+                  ],
+                  "query": "hlavni"
                 }
               }
             }
@@ -277,15 +285,20 @@
             "items": {
               "$ref": "#/components/schemas/PlaceHit"
             }
+          },
+          "query": {
+            "type": "string",
+            "description": "The `q` searched, without its leading and trailing whitespace."
           }
         },
         "required": [
-          "hits"
+          "hits",
+          "query"
         ]
       },
       "PlaceHit": {
         "type": "object",
-        "description": "One place. A member that has no value is absent, never null. `country`, `region`, `district`, `city` and `suburb` are the admin areas the place lies in, derived the same way as a `StopHit`'s, so every hit is labelled alike.",
+        "description": "One place. A member that has no value is absent, never null. A `stop` carries the members of its `StopHit` from stop search under the same names and with the same values, `_geoDistance` excepted (here `distance`); `gtfsId`, `code`, `wheelchairBoarding` and `modes` appear only on a stop, a station's platforms folded into it. `country`, `region`, `district`, `city` and `suburb` are the admin areas the place lies in, derived the same way as a `StopHit`'s, so every hit is labelled alike.",
         "properties": {
           "id": {
             "type": "string",
@@ -293,11 +306,31 @@
           },
           "type": {
             "type": "string",
-            "description": "What the place is: `stop`, `address`, `street`, `place` (a municipality) or `poi` (a point of interest). New values may be added; a client ignores a type it does not know."
+            "description": "What the place is: `stop`, `address`, `place` (a municipality) or `poi` (a point of interest). New values may be added; a client ignores a type it does not know."
+          },
+          "gtfsId": {
+            "type": "string",
+            "description": "A `stop`'s feed-prefixed id (`<feedId>:<id>`), the same id routing's `gtfsId` carries and stop search returns; equal to the hit's `id`. Absent for other types."
           },
           "name": {
             "type": "string",
             "description": "Display name; a stop's is the operator's own."
+          },
+          "code": {
+            "type": "string",
+            "description": "A `stop`'s short public code riders know it by, as the feed gives it (GTFS `stop_code`), e.g. the one printed on its sign. Absent when the feed doesn't provide it, and for other types."
+          },
+          "wheelchairBoarding": {
+            "type": "integer",
+            "format": "int32",
+            "description": "A `stop`'s GTFS `wheelchair_boarding`: `1` some vehicles here can be boarded by a rider in a wheelchair, `2` wheelchair boarding isn't possible here, `0` no information. A station's value is the station's own; its platforms' values aren't combined into it. Absent when the feed doesn't set it, which also means no information, and for other types. Any other value is passed through from the feed unchanged."
+          },
+          "modes": {
+            "type": "array",
+            "description": "Modes of the routes serving a `stop`, each once, as the mode names routing returns for those routes (e.g. `BUS`, `TRAM`, `RAIL`), ordered by scheduled calls at the stop, most first, ties by name. A station's modes cover all its platforms. Absent when no route serves the stop, and for other types.",
+            "items": {
+              "type": "string"
+            }
           },
           "lat": {
             "type": "number",
@@ -311,7 +344,7 @@
           },
           "category": {
             "type": "string",
-            "description": "What kind of place it is: for a `poi` e.g. `university`, `hospital`, `mall`, `cemetery`; for a `place` `municipality`; for an `address` `building`, or `recreational` for a recreational building; for a `street` `street`. Absent for a stop. New values may be added."
+            "description": "What kind of place it is: for a `poi` e.g. `university`, `hospital`, `mall`, `cemetery`; for a `place` `municipality`; for an `address` `building`, or `recreational` for a recreational building. Absent for a stop. New values may be added."
           },
           "country": {
             "type": "string"

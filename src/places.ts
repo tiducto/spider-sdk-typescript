@@ -4,7 +4,8 @@ import { failure, success } from './result.ts';
 import { badRequest, toSpiderError } from './errors.ts';
 import type { PlaceType } from './enums.ts';
 import { placeTypeFromWire } from './enums.ts';
-import type { GeoPoint } from './stops.ts';
+import type { GeoPoint, Stop } from './stops.ts';
+import { toStop } from './stops.ts';
 
 /**
  * One place search hit: a stop, an address, a municipality or a point of interest. The admin labels
@@ -33,6 +34,8 @@ export interface PlaceHit {
   readonly suburb: string | null;
   /** Metres from the search's `near` point; null when the search had none. */
   readonly distance: number | null;
+  /** For a `STOP`, the stop as stop search returns it; undefined for any other type. */
+  readonly stop?: Stop;
 }
 
 export interface PlaceSearchOptions {
@@ -77,6 +80,8 @@ export class SpiderPlaces {
 }
 
 function toPlaceHit(hit: PlaceHitWire): PlaceHit {
+  const gtfsId = hit.gtfsId;
+  const stop = hit.type === 'stop' && gtfsId != null ? toStop({ ...hit, gtfsId }) : undefined;
   return {
     id: hit.id,
     type: placeTypeFromWire(hit.type),
@@ -90,17 +95,23 @@ function toPlaceHit(hit: PlaceHitWire): PlaceHit {
     city: hit.city ?? null,
     suburb: hit.suburb ?? null,
     distance: hit.distance ?? null,
+    ...(stop != null ? { stop } : {}),
   };
 }
 
 interface PlaceSearchResponseWire {
   hits: PlaceHitWire[];
+  query: string;
 }
 
 interface PlaceHitWire {
   id: string;
   type: string;
+  gtfsId?: string;
   name: string;
+  code?: string;
+  wheelchairBoarding?: number;
+  modes?: string[];
   lat: number;
   lon: number;
   category?: string;
