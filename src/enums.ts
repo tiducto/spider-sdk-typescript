@@ -58,10 +58,10 @@ export type RoutingErrorCode =
 export type InputField = 'DATE_TIME' | 'FROM' | 'TO' | 'VIA' | 'UNKNOWN';
 
 /**
- * What a place search hit is: a transit `STOP`, a single `ADDRESS`, a `STREET`, a `PLACE` (a municipality) or a `POI`
- * (a point of interest). A kind this SDK version doesn't know is `UNKNOWN`.
+ * What a place search hit is: a transit `STOP`, a single `ADDRESS`, a `PLACE` (a municipality) or a `POI` (a point of
+ * interest). A kind this SDK version doesn't know is `UNKNOWN`.
  */
-export type PlaceType = 'STOP' | 'ADDRESS' | 'STREET' | 'PLACE' | 'POI' | 'UNKNOWN';
+export type PlaceType = 'STOP' | 'ADDRESS' | 'PLACE' | 'POI' | 'UNKNOWN';
 
 /** Delay level, for planning (`plan`) and for `typicalDelaySeconds` (`departures`, `trip`): the p50 (`STANDARD`), p70 (`SAFE`) or p90 (`VERY_SAFE`) of the trip's recorded delay. */
 export type Reliability = 'STANDARD' | 'SAFE' | 'VERY_SAFE';
@@ -91,7 +91,7 @@ const ROUTING_ERROR_CODES: Known<RoutingErrorCode> = {
   WALKING_BETTER_THAN_TRANSIT: true,
 };
 
-const PLACE_TYPES: Known<PlaceType> = { STOP: true, ADDRESS: true, STREET: true, PLACE: true, POI: true };
+const PLACE_TYPES: Known<PlaceType> = { STOP: true, ADDRESS: true, PLACE: true, POI: true };
 
 const INPUT_FIELDS: Known<InputField> = { DATE_TIME: true, FROM: true, TO: true, VIA: true };
 

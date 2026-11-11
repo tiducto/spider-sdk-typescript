@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.7.1
+
+### Removed
+
+- **`PlaceType` `'STREET'`**: place search no longer returns streets, and a `street` type decodes as `UNKNOWN`. A
+  query without a house number lists stops, municipalities (`PLACE`) and points of interest; one with a house number
+  (any digit) lists individual addresses.
+
 ## 1.6.0 — 2026-11-02
 
 Targets Spider API contract 1.6.

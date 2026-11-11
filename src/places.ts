@@ -7,7 +7,7 @@ import { placeTypeFromWire } from './enums.ts';
 import type { GeoPoint } from './stops.ts';
 
 /**
- * One place search hit: a stop, an address, a street, a municipality or a point of interest. The admin labels
+ * One place search hit: a stop, an address, a municipality or a point of interest. The admin labels
  * (`country` … `suburb`) are the areas the place lies in, labelled the same way as a `Stop`'s.
  */
 export interface PlaceHit {
@@ -23,7 +23,7 @@ export interface PlaceHit {
   readonly lon: number;
   /**
    * What kind of place it is: for a `POI` e.g. `university`, `hospital`, `mall`; `municipality` for a `PLACE`;
-   * `building` or `recreational` for an `ADDRESS`; `street` for a `STREET`; null for a stop. New values may appear.
+   * `building` or `recreational` for an `ADDRESS`; null for a stop. New values may appear.
    */
   readonly category: string | null;
   readonly country: string | null;
@@ -53,11 +53,11 @@ export class SpiderPlaces {
   }
 
   /**
-   * Places matching `query` in the environment's service area, best first: stops, addresses, streets, municipalities
-   * (`PLACE`) and points of interest. `query` is 2 to 100 characters; abbreviated and spelled-out forms find each
-   * other, and text without diacritics matches text with them. A query with a house number (`Údolní 53`) lists
-   * individual addresses; without one, a street stands for its addresses. A limit outside 1–20 fails as
-   * `bad_request` without a request.
+   * Places matching `query` in the environment's service area, best first: stops, addresses, municipalities (`PLACE`)
+   * and points of interest. `query` is 2 to 100 characters; abbreviated and spelled-out forms find each other, and
+   * text without diacritics matches text with them. A query with a house number (any digit, as in `Údolní 53`) lists
+   * individual addresses; without one, it lists stops, municipalities and points of interest, and no addresses. A
+   * limit outside 1–20 fails as `bad_request` without a request.
    */
   async search(query: string, options?: PlaceSearchOptions): Promise<SpiderResult<PlaceHit[]>> {
     const limit = options?.limit ?? DEFAULT_LIMIT;
