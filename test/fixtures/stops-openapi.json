@@ -2,8 +2,8 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Tiducto Transit API — Stops",
-    "version": "1.7",
-    "description": "Stop text and geo search, key-authenticated. Companion to routing, realtime and places; the four share one pack version. A member that has no value is absent, never null. `locationType` is a closed set (`0`, `1`); `wheelchairBoarding` is the feed's GTFS integer code, and an unrecognised code passes through unchanged. A path that matches no operation, and every path of an environment without a stop-search deployment, is the gateway's plain-text `404 Not Found`, outside every operation."
+    "version": "1.8",
+    "description": "Stop text and geo search, key-authenticated. Companion to routing, realtime and places; the four share one pack version. A member that has no value is absent, never null. `wheelchairBoarding` is the feed's GTFS integer code, and an unrecognised code passes through unchanged. A path that matches no operation, and every path of an environment without a stop-search deployment, is the gateway's plain-text `404 Not Found`, outside every operation."
   },
   "servers": [
     {
@@ -59,7 +59,6 @@
                     {
                       "gtfsId": "1:U1660Z3",
                       "name": "Technická",
-                      "locationType": 0,
                       "wheelchairBoarding": 1,
                       "modes": [
                         "BUS"
@@ -76,7 +75,6 @@
                     {
                       "gtfsId": "1:U1155Z1",
                       "name": "Horská",
-                      "locationType": 0,
                       "wheelchairBoarding": 1,
                       "modes": [
                         "BUS"
@@ -93,7 +91,6 @@
                     {
                       "gtfsId": "1:U1777Z3",
                       "name": "Záhřebská",
-                      "locationType": 0,
                       "wheelchairBoarding": 0,
                       "modes": [
                         "BUS"
@@ -220,7 +217,7 @@
               "string",
               "null"
             ],
-            "description": "A filter expression: conditions `attribute OPERATOR value` combined with `AND`, `OR` and `NOT`, read left to right, grouped with parentheses. Operators: `=`, `!=`, `>`, `>=`, `<`, `<=`, `low TO high` (an inclusive range), `IN [a, b]`, `EXISTS`, `IS NULL` and `IS EMPTY`, the last four negatable with `NOT` (`NOT IN`, `NOT EXISTS`, `IS NOT NULL`, `IS NOT EMPTY`). A value with whitespace, or one that reads as an operator, is quoted with `'` or `\"`. Geo conditions: `_geoRadius(lat, lng, metres)`, `_geoBoundingBox([northLat, eastLng], [southLat, westLng])` and `_geoPolygon([lat, lng], [lat, lng], [lat, lng], ...)` (three or more vertices). Filterable attributes: `gtfsId`, the admin levels (`country`, `region`, `district`, `city`, `suburb`), `locationType`, `wheelchairBoarding`, `modes` and `_geo` (the stop's position). Examples: `city = \"Brno\"`, `gtfsId = \"1:39822\"`, `locationType = 1` (stations), `locationType != 1` (everything else, stops that omit the field included), `wheelchairBoarding = 1`, `modes = RAIL` (stops a rail route serves), `_geoRadius(49.1951, 16.6068, 500)`. An attribute that isn't filterable or a malformed expression is a 400 `filter is invalid`; filtering on an admin level the environment wasn't enriched with matches no stops. A filter array or another type is a 400 `filter is invalid`."
+            "description": "A filter expression: conditions `attribute OPERATOR value` combined with `AND`, `OR` and `NOT`, read left to right, grouped with parentheses. Operators: `=`, `!=`, `>`, `>=`, `<`, `<=`, `low TO high` (an inclusive range), `IN [a, b]`, `EXISTS`, `IS NULL` and `IS EMPTY`, the last four negatable with `NOT` (`NOT IN`, `NOT EXISTS`, `IS NOT NULL`, `IS NOT EMPTY`). A value with whitespace, or one that reads as an operator, is quoted with `'` or `\"`. Geo conditions: `_geoRadius(lat, lng, metres)`, `_geoBoundingBox([northLat, eastLng], [southLat, westLng])` and `_geoPolygon([lat, lng], [lat, lng], [lat, lng], ...)` (three or more vertices). Filterable attributes: `gtfsId`, the admin levels (`country`, `region`, `district`, `city`, `suburb`), `wheelchairBoarding`, `modes` and `_geo` (the stop's position). Examples: `city = \"Brno\"`, `gtfsId = \"1:39822\"`, `wheelchairBoarding = 1`, `modes = RAIL` (stops a rail route serves), `_geoRadius(49.1951, 16.6068, 500)`. An attribute that isn't filterable or a malformed expression is a 400 `filter is invalid`; filtering on an admin level the environment wasn't enriched with matches no stops. A filter array or another type is a 400 `filter is invalid`."
           },
           "sort": {
             "type": [
@@ -279,13 +276,6 @@
           "code": {
             "type": "string",
             "description": "Short public code riders know the stop by, as the feed gives it (GTFS `stop_code`), e.g. the one printed on its sign."
-          },
-          "locationType": {
-            "type": "integer",
-            "format": "int32",
-            "description": "GTFS `location_type`: `0` a stop or platform, `1` a station (its platforms folded into it). Absent when the feed doesn't set it, which means a stop. No other values are returned.",
-            "minimum": 0.0,
-            "maximum": 1.0
           },
           "wheelchairBoarding": {
             "type": "integer",
