@@ -84,7 +84,8 @@ test('stop-search wheelchair codes decode like the routing enum', () => {
 });
 
 test('place types decode from their lower-case wire spelling, an unknown one to UNKNOWN', () => {
-  assert.deepEqual(['stop', 'address', 'street', 'place', 'poi'].map(placeTypeFromWire), ['STOP', 'ADDRESS', 'STREET', 'PLACE', 'POI']);
+  assert.deepEqual(['stop', 'address', 'place', 'poi'].map(placeTypeFromWire), ['STOP', 'ADDRESS', 'PLACE', 'POI']);
+  assert.equal(placeTypeFromWire('street'), 'UNKNOWN');
   assert.equal(placeTypeFromWire('district'), 'UNKNOWN');
   assert.equal(placeTypeFromWire('constructor'), 'UNKNOWN');
 });

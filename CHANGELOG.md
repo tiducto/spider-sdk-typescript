@@ -1,5 +1,29 @@
 # Changelog
 
+## 1.7.1
+
+### Removed
+
+- **`PlaceType` `'STREET'`**: place search no longer returns streets, and a `street` type decodes as `UNKNOWN`. A
+  query without a house number lists stops, municipalities (`PLACE`) and points of interest; one with a house number
+  (any digit) lists individual addresses.
+
+## 1.7.0 — 2026-11-11
+
+Targets Spider API contract 1.7.
+
+### Added
+
+- **`client.places` (`SpiderPlaces`)**: `search(query, { near?, limit? })` searches stops, addresses, municipalities
+  and points of interest in one query, best first, returning `PlaceHit[]`. `limit` defaults to 10 and is 1 to 20; one
+  outside that range fails as `bad_request` without a request. With `near`, the nearest of equally good matches ranks
+  first and each hit carries `distance` in metres. A query with a house number lists individual addresses. A `STOP`
+  hit's `id` is the stop id routing takes.
+- **`PlaceHit`** (`id`, `type`, `name`, `lat`, `lon`, `category`, the admin labels `country` … `suburb` as on a `Stop`,
+  `distance`) and **`PlaceType`** (`STOP`, `ADDRESS`, `PLACE` for a municipality, `POI`, and `UNKNOWN` for a type this
+  SDK version doesn't know).
+- **`SpiderClientOptions.places`**: per-feature options for place search, as for `routing`, `stops` and `realtime`.
+
 ## 1.6.0 — 2026-11-02
 
 Targets Spider API contract 1.6.

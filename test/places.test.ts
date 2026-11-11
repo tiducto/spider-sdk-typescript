@@ -58,7 +58,7 @@ test('hits map with their type, category, admin labels and distance; absent memb
   const result = await client.places.search('brno', { near: { lat: 49.19, lng: 16.6 } });
 
   if (!result.isSuccess) throw new Error(result.error.code);
-  assert.deepEqual(result.data.map((h) => h.type), ['STOP', 'POI', 'ADDRESS', 'STREET', 'PLACE']);
+  assert.deepEqual(result.data.map((h) => h.type), ['STOP', 'POI', 'ADDRESS', 'UNKNOWN', 'PLACE']);
   assert.deepEqual(result.data[0], {
     id: '1:U1234Z1',
     type: 'STOP',
