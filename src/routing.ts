@@ -3,10 +3,11 @@ import type { SpiderResult } from './result.ts';
 import { failure, success } from './result.ts';
 import type { SpiderError } from './errors.ts';
 import { DecodingError, TransportError, badRequest, httpFailure, toSpiderError } from './errors.ts';
-import type { BikesAllowed, InputField, RealtimeState, Reliability, RoutingErrorCode, TransitMode, WheelchairBoarding } from './enums.ts';
+import type { BikesAllowed, InputField, PickupDropoffType, RealtimeState, Reliability, RoutingErrorCode, TransitMode, WheelchairBoarding } from './enums.ts';
 import {
   bikesAllowedFromWire,
   inputFieldFromWire,
+  pickupDropoffTypeFromWire,
   realtimeStateFromWire,
   routingErrorCodeFromWire,
   transitModeFromWire,
@@ -90,6 +91,10 @@ export interface Leg {
   readonly tripGtfsId: string | null;
   /** True when the rider stays on board from the previous leg as the vehicle continues as another trip; not counted as a transfer. */
   readonly interlineWithPreviousLeg: boolean;
+  /** How the rider boards at the leg's `from` stop; `COORDINATE_WITH_DRIVER` is a stop on request. `SCHEDULED` on a walk leg and on an interlined leg, where the rider is already on board. */
+  readonly pickupType: PickupDropoffType;
+  /** How the rider alights at the leg's `to` stop; `COORDINATE_WITH_DRIVER` is a stop on request. `SCHEDULED` on a walk leg and when the next leg is interlined, where the rider stays on board. */
+  readonly dropoffType: PickupDropoffType;
   readonly bikesAllowed: BikesAllowed | null;
   /** @deprecated Always null. */
   readonly accessibilityScore: number | null;
@@ -197,6 +202,10 @@ export interface Departure {
   readonly wheelchairAccessible: WheelchairBoarding | null;
   /** The departure's position in its trip, as the trip's {@link TripStop.stopPosition}. */
   readonly stopPosition: number | null;
+  /** How a rider boards here; `COORDINATE_WITH_DRIVER` is a stop on request. Never `NONE`: departures nobody can board are left out. */
+  readonly pickupType: PickupDropoffType;
+  /** How a rider alights here; `COORDINATE_WITH_DRIVER` is a stop on request. */
+  readonly dropoffType: PickupDropoffType;
 }
 
 export interface TripStop {
@@ -218,6 +227,10 @@ export interface TripStop {
   readonly stopPosition: number | null;
   /** Index into {@link TripDetails.geometry} of where the stop sits on the trip's line; null when the trip has no geometry or the stop has no point on it. */
   readonly geometryIndex: number | null;
+  /** How a rider boards here; `COORDINATE_WITH_DRIVER` is a stop on request. Null when the stop is canceled: the trip is canceled or realtime skips the stop. */
+  readonly pickupType: PickupDropoffType | null;
+  /** How a rider alights here; `COORDINATE_WITH_DRIVER` is a stop on request. Null when the stop is canceled. */
+  readonly dropoffType: PickupDropoffType | null;
 }
 
 export interface TripDetails {
@@ -822,6 +835,8 @@ function mapLeg(leg: LegWire): Leg {
     durationSeconds: leg.duration,
     tripGtfsId: trip?.gtfsId ?? null,
     interlineWithPreviousLeg: leg.interlineWithPreviousLeg,
+    pickupType: pickupDropoffTypeFromWire(leg.pickupType),
+    dropoffType: pickupDropoffTypeFromWire(leg.dropoffType),
     bikesAllowed: bikesAllowedFromWire(trip?.bikesAllowed),
     accessibilityScore: null,
     fromWheelchair: wheelchairFromWire(fromStop?.wheelchairBoarding),
@@ -852,6 +867,8 @@ function mapDepartures(stop: DepartureBoard): Departure[] {
       platformCode: st.stop.platformCode ?? null,
       wheelchairAccessible: wheelchairFromWire(st.trip.wheelchairAccessible),
       stopPosition: st.stopPosition ?? null,
+      pickupType: pickupDropoffTypeFromWire(st.pickupType),
+      dropoffType: pickupDropoffTypeFromWire(st.dropoffType),
     };
   });
 }
@@ -877,6 +894,8 @@ function mapTrip(trip: TripTimetable, serviceDate: string): TripDetails {
       zoneId: s.zoneId ?? null,
       stopPosition: st.stopPosition ?? null,
       geometryIndex: st.geometryIndex ?? null,
+      pickupType: pickupDropoffTypeFromWire(st.pickupType),
+      dropoffType: pickupDropoffTypeFromWire(st.dropoffType),
     };
   });
   return {

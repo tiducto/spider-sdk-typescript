@@ -30,6 +30,8 @@ const PLAN_RESPONSE = {
           distance: 1200.5,
           duration: 900,
           trip: { gtfsId: '1:trip', bikesAllowed: 'ALLOWED' },
+          pickupType: 'SCHEDULED',
+          dropoffType: 'COORDINATE_WITH_DRIVER',
           interlineWithPreviousLeg: true,
           legGeometry: { points: '_izlhA~rlgdF' },
         },
@@ -109,6 +111,8 @@ test('plan POSTs the REST body to /routing/v1/plan and maps the route', async ()
   assert.equal(leg.serviceDate, '2026-07-20');
   assert.equal(leg.typicalArrivalDelaySeconds, 90);
   assert.equal(leg.interlineWithPreviousLeg, true);
+  assert.equal(leg.pickupType, 'SCHEDULED');
+  assert.equal(leg.dropoffType, 'COORDINATE_WITH_DRIVER');
   assert.deepEqual(route.pageInfo, {
     startCursor: 'c-start',
     endCursor: 'c-end',
@@ -181,6 +185,8 @@ test('a walk leg maps its null route, trip, stops, estimates and typical delay t
     distance: 300,
     duration: 300,
     trip: null,
+    pickupType: 'SCHEDULED',
+    dropoffType: 'SCHEDULED',
     interlineWithPreviousLeg: false,
     legGeometry: { points: '_izlhA~rlgdF' },
   }];
@@ -194,6 +200,8 @@ test('a walk leg maps its null route, trip, stops, estimates and typical delay t
   assert.equal(leg.mode, 'WALK');
   assert.equal(leg.typicalArrivalDelaySeconds, null);
   assert.equal(leg.interlineWithPreviousLeg, false);
+  assert.equal(leg.pickupType, 'SCHEDULED');
+  assert.equal(leg.dropoffType, 'SCHEDULED');
   assert.equal(leg.startEstimated, null);
   assert.equal(leg.startDelaySeconds, null);
   assert.equal(leg.serviceDate, null);
@@ -277,6 +285,8 @@ function departureRow(overrides: Record<string, unknown>): Record<string, unknow
     realtime: false,
     realtimeState: 'SCHEDULED',
     typicalDelay: null,
+    pickupType: 'SCHEDULED',
+    dropoffType: 'SCHEDULED',
     headsign: null,
     stop: { gtfsId: '1:U1Z1', platformCode: null },
     trip: {
@@ -304,6 +314,8 @@ test('departures POSTs to /routing/v1/departures, maps stoptimes, keeps rows hea
             realtimeState: 'UPDATED',
             typicalDelay: 45,
             stopPosition: 7,
+            pickupType: 'COORDINATE_WITH_DRIVER',
+            dropoffType: 'NONE',
             headsign: 'Center',
             stop: { gtfsId: '1:U1Z2', platformCode: '2' },
             trip: {
@@ -352,6 +364,8 @@ test('departures POSTs to /routing/v1/departures, maps stoptimes, keeps rows hea
   assert.equal(d.wheelchairAccessible, 'POSSIBLE');
   assert.equal(d.typicalDelaySeconds, 45);
   assert.equal(d.stopPosition, 7);
+  assert.equal(d.pickupType, 'COORDINATE_WITH_DRIVER');
+  assert.equal(d.dropoffType, 'NONE');
   // Null display fields and NO_INFORMATION stay null.
   const bare = result.data[1];
   assert.equal(bare.realtimeTimeEpochMs, 1_120_000);
@@ -363,6 +377,8 @@ test('departures POSTs to /routing/v1/departures, maps stoptimes, keeps rows hea
   assert.equal(bare.wheelchairAccessible, null);
   assert.equal(bare.typicalDelaySeconds, null);
   assert.equal(bare.stopPosition, null);
+  assert.equal(bare.pickupType, 'SCHEDULED');
+  assert.equal(bare.dropoffType, 'SCHEDULED');
 });
 
 test('departures sends reliability only when set', async () => {
@@ -398,6 +414,8 @@ test('trip POSTs to /routing/v1/trip and maps stops, geometry and enums', async 
             typicalDelay: 30,
             stopPosition: 3,
             geometryIndex: 0,
+            pickupType: 'SCHEDULED',
+            dropoffType: 'CALL_AGENCY',
             stop: { gtfsId: '1:s1', name: 'Stop 1', lat: 49.1, lon: 16.6, wheelchairBoarding: 'POSSIBLE', platformCode: 'A', zoneId: '100' },
           },
           {
@@ -410,6 +428,8 @@ test('trip POSTs to /routing/v1/trip and maps stops, geometry and enums', async 
             realtimeState: 'UPDATED',
             typicalDelay: null,
             stopPosition: 5,
+            pickupType: null,
+            dropoffType: null,
             stop: { gtfsId: '1:s2', name: 'Stop 2', lat: 49.2, lon: 16.7, wheelchairBoarding: 'NO_INFORMATION', platformCode: null, zoneId: null },
           },
         ],
@@ -442,6 +462,10 @@ test('trip POSTs to /routing/v1/trip and maps stops, geometry and enums', async 
   assert.deepEqual(trip.stops.map((s) => s.stopPosition), [3, 5]);
   assert.deepEqual(trip.geometry[trip.stops[0].geometryIndex ?? -1], { lat: 38.5, lon: -120.2 });
   assert.equal(trip.stops[1].geometryIndex, null);
+  assert.equal(trip.stops[0].pickupType, 'SCHEDULED');
+  assert.equal(trip.stops[0].dropoffType, 'CALL_AGENCY');
+  assert.equal(trip.stops[1].pickupType, null);
+  assert.equal(trip.stops[1].dropoffType, null);
   assert.equal(trip.stops[0].scheduledArrivalEpochMs, (SERVICE_DAY_2026_07_20 + 60) * 1000);
   assert.equal(trip.stops[0].wheelchairBoarding, 'POSSIBLE');
   assert.equal(trip.stops[1].realtimeArrivalEpochMs, (SERVICE_DAY_2026_07_20 + 150) * 1000);
@@ -660,6 +684,7 @@ test('routing errors decode FROM/TO/VIA, and unknown codes, fields and enums dec
   const leg = response.itineraries[0].legs[0];
   leg.mode = 'HOVERCRAFT';
   leg.realtimeState = 'DELAYED';
+  leg.pickupType = 'BY_DRONE';
   leg.from = { name: 'A', stop: { gtfsId: '1:A', wheelchairBoarding: 'PARTIAL' } };
   leg.trip = { gtfsId: '1:trip', bikesAllowed: 'FOLDING_ONLY' };
   const mock = mockFetch({ json: response });
@@ -676,6 +701,7 @@ test('routing errors decode FROM/TO/VIA, and unknown codes, fields and enums dec
   const mapped = result.data.edges[0].itinerary.legs[0];
   assert.equal(mapped.mode, 'UNKNOWN');
   assert.equal(mapped.realtimeState, 'UNKNOWN');
+  assert.equal(mapped.pickupType, 'UNKNOWN');
   assert.equal(mapped.fromWheelchair, 'UNKNOWN');
   assert.equal(mapped.bikesAllowed, 'UNKNOWN');
 });

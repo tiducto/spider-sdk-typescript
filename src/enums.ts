@@ -44,6 +44,12 @@ export type OccupancyStatus =
 
 export type RealtimeState = 'ADDED' | 'CANCELED' | 'MODIFIED' | 'SCHEDULED' | 'UPDATED' | 'UNKNOWN';
 
+/**
+ * Whether and how a rider boards or alights at a stop: `SCHEDULED` regularly, `NONE` not at all, `CALL_AGENCY` only
+ * after phoning the agency, `COORDINATE_WITH_DRIVER` only by arranging it with the driver (a stop on request).
+ */
+export type PickupDropoffType = 'SCHEDULED' | 'NONE' | 'CALL_AGENCY' | 'COORDINATE_WITH_DRIVER' | 'UNKNOWN';
+
 export type RoutingErrorCode =
   | 'LOCATION_NOT_FOUND'
   | 'NO_DIRECT_MODE_CONNECTION'
@@ -85,6 +91,8 @@ const BIKES_ALLOWED: Known<BikesAllowed> = { ALLOWED: true, NOT_ALLOWED: true };
 
 const REALTIME_STATES: Known<RealtimeState> = { ADDED: true, CANCELED: true, MODIFIED: true, SCHEDULED: true, UPDATED: true };
 
+const PICKUP_DROPOFF_TYPES: Known<PickupDropoffType> = { SCHEDULED: true, NONE: true, CALL_AGENCY: true, COORDINATE_WITH_DRIVER: true };
+
 const ROUTING_ERROR_CODES: Known<RoutingErrorCode> = {
   LOCATION_NOT_FOUND: true, NO_DIRECT_MODE_CONNECTION: true, NO_STOPS_IN_RANGE: true, NO_TRANSIT_CONNECTION: true,
   NO_TRANSIT_CONNECTION_IN_SEARCH_WINDOW: true, OUTSIDE_BOUNDS: true, OUTSIDE_SERVICE_PERIOD: true,
@@ -109,6 +117,12 @@ export function realtimeStateFromWire(raw: string): RealtimeState;
 export function realtimeStateFromWire(raw: string | null | undefined): RealtimeState | null;
 export function realtimeStateFromWire(raw: string | null | undefined): RealtimeState | null {
   return raw == null ? null : decode(REALTIME_STATES, raw);
+}
+
+export function pickupDropoffTypeFromWire(raw: string): PickupDropoffType;
+export function pickupDropoffTypeFromWire(raw: string | null | undefined): PickupDropoffType | null;
+export function pickupDropoffTypeFromWire(raw: string | null | undefined): PickupDropoffType | null {
+  return raw == null ? null : decode(PICKUP_DROPOFF_TYPES, raw);
 }
 
 export function routingErrorCodeFromWire(raw: string | null | undefined): RoutingErrorCode {
