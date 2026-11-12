@@ -1,3 +1,4 @@
+import type { PickupDropoffType } from './PickupDropoffType.ts';
 import type { RealtimeState } from './RealtimeState.ts';
 import type { StopDeparturesStop } from './StopDeparturesStop.ts';
 import type { StopDeparturesTrip } from './StopDeparturesTrip.ts';
@@ -16,6 +17,10 @@ export interface StopDeparturesStoptime {
   realtimeState: RealtimeState;
   /** Seconds of delay at the requested `reliability`: that level's percentile of the trip's recorded delay at this stop on the service date's day type, from the environment's realtime history. Never below 0. At each level, no trip arrives at a stop, delay applied, before an earlier trip of the same pattern does. Null when `reliability` is omitted, when the trip has live realtime, a canceled trip included, or when there is no history. */
   typicalDelay: number | null;
+  /** How a rider boards here. Never `NONE`: the board leaves out departures nobody can board. */
+  pickupType: PickupDropoffType;
+  /** How a rider alights here. */
+  dropoffType: PickupDropoffType;
   /** Null when the feed has none. */
   headsign: string | null;
   /** The position in the trip of this departure, as the trip's `stopPosition`. */

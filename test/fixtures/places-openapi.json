@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Tiducto Transit API — Places",
-    "version": "1.8",
+    "version": "1.9",
     "description": "Place search over the environment's service area (stops, addresses, municipalities and points of interest), key-authenticated. Companion to routing, stops and realtime; the four share one pack version. A member that has no value is absent, never null. `type` is an open set: new values may be added, and a client ignores a type it does not know. A stop's `id` is the value routing's `stopLocation.stopLocationId` takes, and a stop carries the members of its stop search hit under the same names, `_geoDistance` excepted (here `distance`). `wheelchairBoarding` is the feed's GTFS integer code, and an unrecognised code passes through unchanged. Addresses and municipalities are from RÚIAN, the Czech register of addresses and territorial units (© ČÚZK, CC BY 4.0); points of interest are from OpenStreetMap (© OpenStreetMap contributors, ODbL); results carry those attribution obligations. A query parameter not listed is a 400 `<name> is not allowed`, and a repeated one a 400 `<name> is invalid`. A method an operation doesn't take is a 405 `method_not_allowed`. A path that matches no operation, and every path of an environment without places search, is the gateway's plain-text `404 Not Found`, outside every operation."
   },
   "servers": [
