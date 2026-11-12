@@ -1,6 +1,7 @@
 import type { Geometry } from './Geometry.ts';
 import type { LegTime } from './LegTime.ts';
 import type { Mode } from './Mode.ts';
+import type { PickupDropoffType } from './PickupDropoffType.ts';
 import type { Place } from './Place.ts';
 import type { RealtimeState } from './RealtimeState.ts';
 import type { Route } from './Route.ts';
@@ -31,6 +32,10 @@ export interface Leg {
   duration: number;
   /** Null on a walk leg. */
   trip: Trip | null;
+  /** How the rider boards the leg's trip at `from`. `SCHEDULED` on a walk leg and on a leg with `interlineWithPreviousLeg`, where the rider is already on board. */
+  pickupType: PickupDropoffType;
+  /** How the rider alights from the leg's trip at `to`. `SCHEDULED` on a walk leg and on a leg the next leg continues with `interlineWithPreviousLeg`, where the rider stays on board. */
+  dropoffType: PickupDropoffType;
   /** True on a transit leg ridden in the same vehicle as the previous leg: the vehicle carries on as another trip, often under another line number, and the rider stays on board. That change is not counted in `numberOfTransfers`. False on every other leg. */
   interlineWithPreviousLeg: boolean;
   legGeometry: Geometry;

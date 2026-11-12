@@ -14,6 +14,7 @@ export type { Itinerary } from './Itinerary.ts';
 export type { Leg } from './Leg.ts';
 export type { LegTime } from './LegTime.ts';
 export type { Mode } from './Mode.ts';
+export type { PickupDropoffType } from './PickupDropoffType.ts';
 export type { Place } from './Place.ts';
 export type { PlanCoordinateInput } from './PlanCoordinateInput.ts';
 export type { PlanDateTimeInput } from './PlanDateTimeInput.ts';

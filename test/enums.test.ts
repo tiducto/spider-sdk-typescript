@@ -8,6 +8,7 @@ import {
   bikesAllowedFromWire,
   inputFieldFromWire,
   occupancyFromWire,
+  pickupDropoffTypeFromWire,
   placeTypeFromWire,
   realtimeStateFromWire,
   routingErrorCodeFromWire,
@@ -15,7 +16,7 @@ import {
   wheelchairFromGtfs,
   wheelchairFromWire,
 } from '../src/enums.ts';
-import type { BikesAllowed, InputField, PlaceType, RealtimeState, Reliability, RoutingErrorCode, TransitMode, WheelchairBoarding } from '../src/index.ts';
+import type { BikesAllowed, InputField, PickupDropoffType, PlaceType, RealtimeState, Reliability, RoutingErrorCode, TransitMode, WheelchairBoarding } from '../src/index.ts';
 
 const ROUTING_CONTRACT = path.join(path.dirname(path.dirname(fileURLToPath(import.meta.url))), 'src/contract/routing');
 
@@ -36,6 +37,7 @@ function wireValues(name: string): string[] {
 test('every contract enum value decodes to itself in wire spelling, not UNKNOWN', () => {
   for (const value of [...wireValues('Mode'), ...wireValues('TransitMode')]) assert.equal(transitModeFromWire(value), value);
   for (const value of wireValues('RealtimeState')) assert.equal(realtimeStateFromWire(value), value);
+  for (const value of wireValues('PickupDropoffType')) assert.equal(pickupDropoffTypeFromWire(value), value);
   for (const value of wireValues('RoutingErrorCode')) assert.equal(routingErrorCodeFromWire(value), value);
   for (const value of wireValues('InputField')) assert.equal(inputFieldFromWire(value), value);
   for (const value of wireValues('WheelchairBoarding')) {
@@ -49,6 +51,7 @@ test('every contract enum value decodes to itself in wire spelling, not UNKNOWN'
 test('an unrecognized wire value decodes to UNKNOWN for every enum', () => {
   assert.equal(transitModeFromWire('HOVERCRAFT'), 'UNKNOWN');
   assert.equal(realtimeStateFromWire('DELAYED'), 'UNKNOWN');
+  assert.equal(pickupDropoffTypeFromWire('BY_DRONE'), 'UNKNOWN');
   assert.equal(routingErrorCodeFromWire('NEW_CODE'), 'UNKNOWN');
   assert.equal(inputFieldFromWire('FROM_PLACE'), 'UNKNOWN');
   assert.equal(wheelchairFromWire('PARTIAL'), 'UNKNOWN');
@@ -59,7 +62,7 @@ test('an unrecognized wire value decodes to UNKNOWN for every enum', () => {
 });
 
 test('absent and no-information values decode to null', () => {
-  for (const decode of [transitModeFromWire, realtimeStateFromWire, inputFieldFromWire, wheelchairFromWire, bikesAllowedFromWire, occupancyFromWire]) {
+  for (const decode of [transitModeFromWire, realtimeStateFromWire, pickupDropoffTypeFromWire, inputFieldFromWire, wheelchairFromWire, bikesAllowedFromWire, occupancyFromWire]) {
     assert.equal(decode(null), null);
     assert.equal(decode(undefined), null);
   }
@@ -95,6 +98,8 @@ test('place types decode from their lower-case wire spelling, an unknown one to 
 export const notAMode: TransitMode = 'HOVERCRAFT';
 // @ts-expect-error not a RealtimeState
 export const notAState: RealtimeState = 'DELAYED';
+// @ts-expect-error not a PickupDropoffType
+export const notAPickup: PickupDropoffType = 'BY_DRONE';
 // @ts-expect-error not a RoutingErrorCode
 export const notACode: RoutingErrorCode = 'NEW_CODE';
 // @ts-expect-error not an InputField

@@ -44,6 +44,8 @@ test('chunk maps itineraries with realtime delays', () => {
             distance: 5000,
             duration: 1800,
             trip: { gtfsId: '1:T', bikesAllowed: 'NO_INFORMATION' },
+            pickupType: 'SCHEDULED',
+            dropoffType: 'COORDINATE_WITH_DRIVER',
             interlineWithPreviousLeg: true,
             legGeometry: { points: '_izlhA~rlgdF' },
           },
@@ -71,6 +73,8 @@ test('chunk maps itineraries with realtime delays', () => {
   assert.equal(leg.serviceDate, '2026-07-15');
   assert.equal(leg.typicalArrivalDelaySeconds, 75);
   assert.equal(leg.interlineWithPreviousLeg, true);
+  assert.equal(leg.pickupType, 'SCHEDULED');
+  assert.equal(leg.dropoffType, 'COORDINATE_WITH_DRIVER');
   assert.equal(leg.fromName, 'Origin');
   assert.equal(leg.fromGtfsId, '1:A');
   // Null display fields stay null.

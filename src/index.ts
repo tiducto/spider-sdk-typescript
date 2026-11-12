@@ -9,6 +9,7 @@ export type {
   BikesAllowed,
   OccupancyStatus,
   RealtimeState,
+  PickupDropoffType,
   RoutingErrorCode,
   InputField,
   Reliability,
