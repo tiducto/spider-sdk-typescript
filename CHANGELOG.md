@@ -1,5 +1,22 @@
 # Changelog
 
+## 1.9.0
+
+Targets Spider API contract 1.9.
+
+### Added
+
+- **`PickupDropoffType`**: whether and how a rider boards or alights at a stop: `SCHEDULED` regularly, `NONE` not at
+  all, `CALL_AGENCY` only after phoning the agency, `COORDINATE_WITH_DRIVER` only by arranging it with the driver. An
+  app shows a `COORDINATE_WITH_DRIVER` stop as "on request": the rider signals the driver to get off, or waves the
+  vehicle down to get on.
+- **`Leg.pickupType` and `Leg.dropoffType`**: how the rider boards at the leg's first stop and alights at its last;
+  never null. `SCHEDULED` on a walk leg and where the rider stays on board across an interlined pair.
+- **`Departure.pickupType` and `Departure.dropoffType`**: never null. A departure board leaves out departures nobody can
+  board, so `pickupType` is never `NONE`.
+- **`TripStop.pickupType` and `TripStop.dropoffType`**: null when the stop is canceled, because the trip is canceled
+  or realtime skips the stop.
+
 ## 1.8.0
 
 Targets Spider API contract 1.8.
