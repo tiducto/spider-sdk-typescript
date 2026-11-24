@@ -422,6 +422,37 @@ test('a trip modification without optional members maps them to null', async () 
   assert.equal(result.data.freshness.staleSeconds, null);
 });
 
+test('a trip update maps its vehicle as TripVehicle, a partial one with nulls, and none as null', async () => {
+  const mock = mockFetch({
+    json: {
+      serviceDate: '2026-07-19',
+      tripUpdates: [
+        {
+          tripId: '1:T1',
+          stopTimeUpdates: [],
+          vehicle: { id: '1:7103', label: '7103', wheelchairAccessible: 'WHEELCHAIR_ACCESSIBLE', airConditioning: true, wifi: false, cardPayment: true },
+        },
+        { tripId: '1:T2', stopTimeUpdates: [], vehicle: { label: '7200', wheelchairAccessible: 'WHEELCHAIR_INACCESSIBLE' } },
+        { tripId: '1:T3', stopTimeUpdates: [], vehicle: { id: '1:7300', wheelchairAccessible: 'UNKNOWN' } },
+        { tripId: '1:T4', stopTimeUpdates: [], vehicle: {} },
+        { tripId: '1:T5', stopTimeUpdates: [] },
+      ],
+      missing: [],
+    },
+  });
+  const client = new SpiderClient('https://x', 'k', { fetch: mock.fetch });
+  const result = await client.realtime.tripUpdates('2026-07-19', ['1:T1', '1:T2', '1:T3', '1:T4', '1:T5']);
+
+  if (!result.isSuccess) throw new Error(result.error.code);
+  assert.deepEqual(result.data.tripUpdates.map((u) => u.vehicle), [
+    { id: '1:7103', label: '7103', wheelchairAccessible: 'POSSIBLE', airConditioning: true, wifi: false, cardPayment: true },
+    { id: null, label: '7200', wheelchairAccessible: 'NOT_POSSIBLE', airConditioning: null, wifi: null, cardPayment: null },
+    { id: '1:7300', label: null, wheelchairAccessible: null, airConditioning: null, wifi: null, cardPayment: null },
+    { id: null, label: null, wheelchairAccessible: null, airConditioning: null, wifi: null, cardPayment: null },
+    null,
+  ]);
+});
+
 test('tripUpdateFor finds a trip, picks a frequency run by start time compared as a time, and is null otherwise', async () => {
   const mock = mockFetch({ json: TRIP_UPDATES_RESPONSE });
   const client = new SpiderClient('https://x', 'k', { fetch: mock.fetch });

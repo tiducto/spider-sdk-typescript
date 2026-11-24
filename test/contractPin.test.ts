@@ -86,6 +86,7 @@ test('realtime wire types match realtime-openapi', () => {
     ['StopTimeUpdate', 'StopTimeUpdateDtoWire'],
     ['TripUpdatesResponse', 'TripUpdatesResponseWire'],
     ['TripUpdate', 'TripUpdateDtoWire'],
+    ['TripUpdateVehicle', 'TripUpdateVehicleDtoWire'],
     ['TripModification', 'TripModificationDtoWire'],
     ['ReplacementStop', 'ReplacementStopDtoWire'],
     ['StopSelector', 'StopSelectorDtoWire'],
