@@ -1,6 +1,6 @@
 # Changelog
 
-## 1.10.0
+## 1.10.0 — 2026-11-24
 
 Targets Spider API contract 1.10.
 
@@ -15,6 +15,33 @@ Targets Spider API contract 1.10.
   empty excludes nothing, and `WALK` / `UNKNOWN` drop out, as in `allowedTransitModes`. Together with a non-empty
   `allowedTransitModes` it fails as `bad_request` on `modes.transit` (`modes.transit is invalid`) without a request:
   `plan` returns the failure and a stream yields it as its one `failure` event.
+- **`realtime.tripUpdates(serviceDate, tripIds)`**: live trip updates for up to 50 trips on one service date, from
+  `/realtime/v1/trip-updates`. Each `TripUpdate` carries the trip run's `delaySeconds`, `scheduleRelationship` and
+  `stopTimeUpdates`, as a delay did, plus its `startTime`: a frequency-based trip gives one update per run. Takes the
+  same arguments and validation as `delays`. `tripUpdateFor(updates, tripId, startTime?)` looks one up, and
+  `pollTripUpdates` polls it.
+- **`TripUpdate.modifications`** (experimental, as GTFS-RT trip modifications, and may change in a minor release):
+  the detours applying to the run, each a `TripModification` with the replaced span (`startStop` / `endStop`, a
+  `StopSelector` by stop sequence and/or stop id), the `replacementStops` visited instead (with the travel time to
+  each, and a name and position for a stop the feed defines in realtime), `propagatedModificationDelaySeconds`, the
+  `alertId` describing it, `lastModifiedEpochMs` and the detour `shape` as points.
+- **`LiveVehicle.startTime`**: the start time of the run the vehicle is on (GTFS `HH:MM:SS`, may exceed `24:00:00`),
+  telling apart the runs of a frequency-based trip; null when the feed gives none.
+- **`LiveVehicle.wheelchairAccessible`**: `POSSIBLE` or `NOT_POSSIBLE` for the vehicle reported on the trip; null
+  when the feed reports no value or GTFS-RT `UNKNOWN`.
+- **`LiveVehicle.airConditioning`, `wifi` and `cardPayment`**: whether the vehicle is air-conditioned, offers Wi-Fi
+  and accepts card payment on board; null when unknown.
+- **`startTime`** on `realtime.vehicleForTrip` and `pollVehicleForTrip` (`VehicleForTripPollOptions`),
+  `routing.trip` and `routing.estimatedDelays`: picks the run of a frequency-based trip by its start time, a GTFS time
+  `H:MM:SS` or `HH:MM:SS` (`8:10:00` is `08:10:00`). Undefined or empty takes the trip's first run (for a vehicle, the
+  run with the earliest start time). A time no run starts at is an unknown trip: `trip` fails as `not_found` and
+  `estimatedDelays` is null. A malformed time fails as `bad_request` on `startTime` without a request.
+
+### Deprecated
+
+- **`realtime.delays`, `delayFor` and `pollDelays`**: the API deprecated `/realtime/v1/delays` (retired not before
+  2027-05-24). Use `tripUpdates`, `tripUpdateFor` and `pollTripUpdates`; `delays` keeps working until then and
+  answers a frequency-based trip's earliest run only.
 
 ## 1.9.0
 
