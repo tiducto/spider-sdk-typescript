@@ -6,6 +6,7 @@ import type { Place } from './Place.ts';
 import type { RealtimeState } from './RealtimeState.ts';
 import type { Route } from './Route.ts';
 import type { Trip } from './Trip.ts';
+import type { TripVehicle } from './TripVehicle.ts';
 
 /** One walk or ride. */
 export interface Leg {
@@ -39,4 +40,6 @@ export interface Leg {
   /** True on a transit leg ridden in the same vehicle as the previous leg: the vehicle carries on as another trip, often under another line number, and the rider stays on board. That change is not counted in `numberOfTransfers`. False on every other leg. */
   interlineWithPreviousLeg: boolean;
   legGeometry: Geometry;
+  /** The vehicle running the leg's trip run, as the realtime trip update names it. A Spider extension: OTP 2.10 has no vehicle on a leg. Null on a walk leg and until a vehicle is matched to the run. */
+  vehicle: TripVehicle | null;
 }
