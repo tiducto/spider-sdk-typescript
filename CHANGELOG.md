@@ -1,5 +1,20 @@
 # Changelog
 
+## 1.11.0
+
+Targets Spider API contract 1.11.
+
+### Added
+
+- **`TripVehicle`**: the vehicle running a trip run, as the realtime trip update names it, with its `id`
+  (feed-prefixed, the same string as `LiveVehicle.vehicleId`), `label`, `wheelchairAccessible` (`POSSIBLE` or
+  `NOT_POSSIBLE`, the vehicle's realtime access rather than the timetable's), `airConditioning`, `wifi` and
+  `cardPayment`, each null when unknown. One type on every place a trip run is read, so a board or an itinerary
+  shows the vehicle's features without a realtime call:
+  - **`TripUpdate.vehicle`**: null when the update names no vehicle.
+  - **`Leg.vehicle`** (`plan` and `planStream`): null on a walk leg and until a vehicle is matched to the run.
+  - **`Departure.vehicle`** and **`TripDetails.vehicle`**: null until a vehicle is matched to the run.
+
 ## 1.10.0 — 2026-11-24
 
 Targets Spider API contract 1.10.
