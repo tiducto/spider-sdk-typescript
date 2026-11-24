@@ -38,11 +38,32 @@ import type {
   TripRequest,
   TripResponse,
   TripTimetable,
+  TripVehicle as TripVehicleWire,
 } from './contract/routing/index.ts';
 
 export interface LatLon {
   readonly lat: number;
   readonly lon: number;
+}
+
+/**
+ * The vehicle running a trip run, as the realtime trip update names it, with its features: the same vehicle on a
+ * {@link Leg}, a {@link Departure}, a {@link TripDetails} and a realtime `TripUpdate`. `id` is feed-prefixed
+ * (`<feedId>:<id>`), the same string as `LiveVehicle.vehicleId`.
+ */
+export interface TripVehicle {
+  /** Null when the feed gives none. */
+  readonly id: string | null;
+  /** The vehicle's user-visible label; null when the feed gives none. */
+  readonly label: string | null;
+  /** Whether the vehicle takes a wheelchair, its realtime access rather than the timetable's; null when unknown. */
+  readonly wheelchairAccessible: WheelchairBoarding | null;
+  /** Whether the vehicle is air-conditioned; null when unknown. */
+  readonly airConditioning: boolean | null;
+  /** Whether the vehicle offers Wi-Fi; null when unknown. */
+  readonly wifi: boolean | null;
+  /** Whether the vehicle accepts card payment on board; null when unknown. */
+  readonly cardPayment: boolean | null;
 }
 
 export interface Leg {
@@ -101,6 +122,8 @@ export interface Leg {
   readonly fromWheelchair: WheelchairBoarding | null;
   readonly toWheelchair: WheelchairBoarding | null;
   readonly geometry: readonly LatLon[];
+  /** The vehicle running the leg's trip run; null on a walk leg and until a vehicle is matched to the run. */
+  readonly vehicle: TripVehicle | null;
 }
 
 export interface Itinerary {
@@ -206,6 +229,8 @@ export interface Departure {
   readonly pickupType: PickupDropoffType;
   /** How a rider alights here; `COORDINATE_WITH_DRIVER` is a stop on request. */
   readonly dropoffType: PickupDropoffType;
+  /** The vehicle running the departure's trip run; null until a vehicle is matched to the run. */
+  readonly vehicle: TripVehicle | null;
 }
 
 export interface TripStop {
@@ -251,6 +276,8 @@ export interface TripDetails {
   readonly wheelchairAccessible: WheelchairBoarding | null;
   readonly stops: readonly TripStop[];
   readonly geometry: readonly LatLon[];
+  /** The vehicle running this trip run; null until a vehicle is matched to the run. */
+  readonly vehicle: TripVehicle | null;
 }
 
 /**
@@ -883,6 +910,19 @@ function mapLeg(leg: LegWire): Leg {
     fromWheelchair: wheelchairFromWire(fromStop?.wheelchairBoarding),
     toWheelchair: wheelchairFromWire(toStop?.wheelchairBoarding),
     geometry: decodePolyline(leg.legGeometry.points),
+    vehicle: mapTripVehicle(leg.vehicle),
+  };
+}
+
+function mapTripVehicle(v: TripVehicleWire | null | undefined): TripVehicle | null {
+  if (v == null) return null;
+  return {
+    id: v.id ?? null,
+    label: v.label ?? null,
+    wheelchairAccessible: wheelchairFromWire(v.wheelchairAccessible),
+    airConditioning: v.airConditioning ?? null,
+    wifi: v.wifi ?? null,
+    cardPayment: v.cardPayment ?? null,
   };
 }
 
@@ -910,6 +950,7 @@ function mapDepartures(stop: DepartureBoard): Departure[] {
       stopPosition: st.stopPosition ?? null,
       pickupType: pickupDropoffTypeFromWire(st.pickupType),
       dropoffType: pickupDropoffTypeFromWire(st.dropoffType),
+      vehicle: mapTripVehicle(st.vehicle),
     };
   });
 }
@@ -954,6 +995,7 @@ function mapTrip(trip: TripTimetable, serviceDate: string): TripDetails {
     wheelchairAccessible: wheelchairFromWire(trip.wheelchairAccessible),
     stops,
     geometry: geometry != null ? decodePolyline(geometry.points) : [],
+    vehicle: mapTripVehicle(trip.vehicle),
   };
 }
 

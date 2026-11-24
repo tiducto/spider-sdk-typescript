@@ -7,7 +7,7 @@ import { badRequest, httpFailure, limitRefusal, toSpiderError } from './errors.t
 import { invalidServiceDate, invalidStartTime, sameGtfsTime, startTimeOrUndefined } from './serviceDate.ts';
 import type { OccupancyStatus, WheelchairBoarding } from './enums.ts';
 import { occupancyFromWire, vehicleWheelchairFromWire } from './enums.ts';
-import type { LatLon } from './routing.ts';
+import type { LatLon, TripVehicle } from './routing.ts';
 import { decodePolyline } from './polyline.ts';
 
 export interface FeedFreshness {
@@ -148,6 +148,8 @@ export interface TripUpdate {
   readonly stopTimeUpdates: readonly StopTimeUpdate[];
   /** The trip modifications (detours) applying to this run, in feed order; their delays accumulate along the trip. Empty when none applies. Experimental. */
   readonly modifications: readonly TripModification[];
+  /** The vehicle the update names running this run; null when it names none, as before a vehicle is on the run. */
+  readonly vehicle: TripVehicle | null;
 }
 
 /** Result of {@link SpiderRealtime.tripUpdates}: the trip updates for one service date, and the `missing` trip ids with none. Look one up with {@link tripUpdateFor}. */
@@ -381,6 +383,18 @@ function mapTripUpdate(u: TripUpdateDtoWire): TripUpdate {
     scheduleRelationship: u.scheduleRelationship ?? null,
     stopTimeUpdates: u.stopTimeUpdates.map(mapStopTimeUpdate),
     modifications: (u.modifications ?? []).map(mapTripModification),
+    vehicle: u.vehicle !== undefined ? mapTripUpdateVehicle(u.vehicle) : null,
+  };
+}
+
+function mapTripUpdateVehicle(v: TripUpdateVehicleDtoWire): TripVehicle {
+  return {
+    id: v.id ?? null,
+    label: v.label ?? null,
+    wheelchairAccessible: vehicleWheelchairFromWire(v.wheelchairAccessible),
+    airConditioning: v.airConditioning ?? null,
+    wifi: v.wifi ?? null,
+    cardPayment: v.cardPayment ?? null,
   };
 }
 
@@ -541,6 +555,16 @@ interface TripUpdateDtoWire {
   scheduleRelationship?: string;
   stopTimeUpdates: StopTimeUpdateDtoWire[];
   modifications?: TripModificationDtoWire[];
+  vehicle?: TripUpdateVehicleDtoWire;
+}
+
+interface TripUpdateVehicleDtoWire {
+  id?: string;
+  label?: string;
+  wheelchairAccessible?: string;
+  airConditioning?: boolean;
+  wifi?: boolean;
+  cardPayment?: boolean;
 }
 
 interface TripUpdatesResponseWire extends FreshnessWire {
