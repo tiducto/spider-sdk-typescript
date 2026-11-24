@@ -2,6 +2,7 @@ import type { PickupDropoffType } from './PickupDropoffType.ts';
 import type { RealtimeState } from './RealtimeState.ts';
 import type { StopDeparturesStop } from './StopDeparturesStop.ts';
 import type { StopDeparturesTrip } from './StopDeparturesTrip.ts';
+import type { TripVehicle } from './TripVehicle.ts';
 
 export interface StopDeparturesStoptime {
   /** Unix seconds at the start of the trip's service day; it plus a seconds field gives that time as Unix seconds. */
@@ -28,4 +29,6 @@ export interface StopDeparturesStoptime {
   /** The platform or stand the departure leaves from, which tells a station's platforms apart. */
   stop: StopDeparturesStop;
   trip: StopDeparturesTrip;
+  /** The vehicle running the departure's trip run, as the realtime trip update names it. A Spider extension: OTP 2.10 has no vehicle on a departure. Null until a vehicle is matched to the run. Its `wheelchairAccessible` is the vehicle's realtime access, separate from `trip.wheelchairAccessible`, which stays the timetable's. */
+  vehicle: TripVehicle | null;
 }

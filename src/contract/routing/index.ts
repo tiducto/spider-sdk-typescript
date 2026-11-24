@@ -61,6 +61,7 @@ export type { TripResponse } from './TripResponse.ts';
 export type { TripRoute } from './TripRoute.ts';
 export type { TripStop } from './TripStop.ts';
 export type { TripTimetable } from './TripTimetable.ts';
+export type { TripVehicle } from './TripVehicle.ts';
 export type { WalkPreferencesInput } from './WalkPreferencesInput.ts';
 export type { WheelchairBoarding } from './WheelchairBoarding.ts';
 export type { WheelchairPreferencesInput } from './WheelchairPreferencesInput.ts';
