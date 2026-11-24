@@ -1,4 +1,5 @@
 import type { Reliability } from './Reliability.ts';
+import type { TransitMode } from './TransitMode.ts';
 
 /** POST body for `/routing/v1/departures`. A key not listed here is a 400 `<key> is not allowed`, whatever its value, null included. Every bound is rejected, never clamped. `null` on an optional member means absent, and on a required member is a 400 `<path> is required`. */
 export interface DeparturesRequest {
@@ -12,4 +13,6 @@ export interface DeparturesRequest {
   timeRange: number;
   /** The level `typicalDelay` is given at; the times do not depend on it. Omitted or null, `typicalDelay` is null. A value outside `Reliability` is a 400 `reliability is invalid`. */
   reliability?: Reliability;
+  /** Modes the board leaves out: a departure whose route's `mode` is listed gives no row. They are left out before `numberOfDepartures` counts, so the board holds up to `numberOfDepartures` rows of the other modes within `timeRange`. Absent or empty leaves out nothing. A value outside `TransitMode` is a 400 `excludeModes is invalid`. */
+  excludeModes?: TransitMode[];
 }
