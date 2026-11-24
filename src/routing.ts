@@ -15,7 +15,7 @@ import {
 } from './enums.ts';
 import type { Location, ViaLocation } from './location.ts';
 import { decodePolyline } from './polyline.ts';
-import { invalidServiceDate } from './serviceDate.ts';
+import { invalidServiceDate, invalidStartTime, startTimeOrUndefined } from './serviceDate.ts';
 import type {
   DepartureBoard,
   DeparturesRequest,
@@ -62,7 +62,7 @@ export interface Leg {
   readonly isRealtime: boolean;
   /** The realtime state of the leg's trip; `SCHEDULED` on a walk leg. */
   readonly realtimeState: RealtimeState;
-  /** GTFS service date this leg's trip runs on (ISO `YYYY-MM-DD`) — pass it to {@link SpiderRouting.trip}, {@link SpiderRouting.estimatedDelays} and realtime `delays` and `vehicles`; null on a walk leg. */
+  /** GTFS service date this leg's trip runs on (ISO `YYYY-MM-DD`) — pass it to {@link SpiderRouting.trip}, {@link SpiderRouting.estimatedDelays} and realtime `tripUpdates` and `vehicles`; null on a walk leg. */
   readonly serviceDate: string | null;
   /** The stop's name; `Origin` or `Destination` for a coordinate. */
   readonly fromName: string;
@@ -186,7 +186,7 @@ export interface Departure {
   readonly typicalDelaySeconds: number | null;
   readonly headsign: string | null;
   readonly tripGtfsId: string;
-  /** GTFS service date the trip runs on (ISO `YYYY-MM-DD`) — pass it to {@link SpiderRouting.trip}, {@link SpiderRouting.estimatedDelays} and realtime `delays` and `vehicles`. */
+  /** GTFS service date the trip runs on (ISO `YYYY-MM-DD`) — pass it to {@link SpiderRouting.trip}, {@link SpiderRouting.estimatedDelays} and realtime `tripUpdates` and `vehicles`. */
   readonly serviceDate: string;
   readonly routeGtfsId: string;
   readonly routeShortName: string | null;
@@ -566,13 +566,16 @@ export class SpiderRouting {
   /**
    * One trip run: the trip on one service date (ISO `YYYY-MM-DD`, a {@link Leg.serviceDate} or
    * {@link Departure.serviceDate}). `reliability` is the level {@link TripStop.typicalDelaySeconds} is given at;
-   * undefined = none, and it is null. A malformed date fails as `bad_request` without a request.
+   * undefined = none, and it is null. `startTime` picks the run of a frequency-based trip by its start time, a GTFS
+   * time `H:MM:SS` or `HH:MM:SS` (the realtime `startTime`); undefined or empty = the trip's first
+   * run on `serviceDate`, and a time no run starts at is an unknown trip (`not_found`). A malformed date or start time
+   * fails as `bad_request` without a request.
    */
-  async trip(tripId: string, serviceDate: string, reliability?: Reliability): Promise<SpiderResult<TripDetails>> {
-    const invalid = invalidServiceDate(serviceDate);
+  async trip(tripId: string, serviceDate: string, reliability?: Reliability, startTime?: string): Promise<SpiderResult<TripDetails>> {
+    const invalid = invalidServiceDate(serviceDate) ?? invalidStartTime(startTime);
     if (invalid != null) return failure(invalid);
     try {
-      const body: TripRequest = { id: tripId, serviceDate, reliability };
+      const body: TripRequest = { id: tripId, serviceDate, startTime: startTimeOrUndefined(startTime), reliability };
       const trip = (await this.transport.postJson<TripResponse>(TRIP_PATH, body)).trip;
       if (trip == null) {
         throw new TransportError('no_data', `routing returned no trip for id=${tripId}`);
@@ -586,16 +589,24 @@ export class SpiderRouting {
   /**
    * The delay history at one stop of one trip run: `serviceDate` as for {@link trip}, `stopPosition` a
    * {@link TripStop.stopPosition}. Null (a success) for an unknown trip, a stop position not on the trip, or no
-   * history. A malformed date fails as `bad_request` without a request.
+   * history. `startTime` picks the run of a frequency-based trip, as for {@link trip}; a time no run starts at is null.
+   * A malformed date or start time fails as `bad_request` without a request.
    */
-  async estimatedDelays(tripId: string, serviceDate: string, stopPosition: number): Promise<SpiderResult<EstimatedDelays | null>> {
-    const invalid = invalidServiceDate(serviceDate);
+  async estimatedDelays(
+    tripId: string,
+    serviceDate: string,
+    stopPosition: number,
+    startTime?: string,
+  ): Promise<SpiderResult<EstimatedDelays | null>> {
+    const invalid = invalidServiceDate(serviceDate) ?? invalidStartTime(startTime);
     if (invalid != null) return failure(invalid);
+    const run = startTimeOrUndefined(startTime);
     try {
       const dto = await this.transport.getJson<EstimatedDelaysResponse>(ESTIMATED_DELAYS_PATH, {
         tripId,
         serviceDate,
         stopPosition: String(stopPosition),
+        ...(run !== undefined ? { startTime: run } : {}),
       });
       return success(mapEstimatedDelays(dto));
     } catch (e) {
