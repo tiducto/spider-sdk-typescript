@@ -475,6 +475,59 @@ test('trip POSTs to /routing/v1/trip and maps stops, geometry and enums', async 
   assert.equal(trip.geometry.length, 1);
 });
 
+const WIRE_VEHICLE = { id: '1:7103', label: '7103', wheelchairAccessible: 'POSSIBLE', airConditioning: true, wifi: false, cardPayment: true };
+const MAPPED_VEHICLE = { id: '1:7103', label: '7103', wheelchairAccessible: 'POSSIBLE', airConditioning: true, wifi: false, cardPayment: true };
+const UNKNOWN_VEHICLE = { id: null, label: null, wheelchairAccessible: 'NO_INFORMATION', airConditioning: null, wifi: null, cardPayment: null };
+
+test('a plan leg maps its vehicle as TripVehicle, NO_INFORMATION and unknown features as null, and a null vehicle as null', async () => {
+  const response = structuredClone(PLAN_RESPONSE) as unknown as { itineraries: { legs: Record<string, unknown>[] }[] };
+  const leg = response.itineraries[0].legs[0];
+  response.itineraries[0].legs = [
+    { ...leg, vehicle: WIRE_VEHICLE },
+    { ...leg, vehicle: UNKNOWN_VEHICLE },
+    { ...leg, vehicle: null },
+  ];
+  const mock = mockFetch({ json: response });
+  const client = new SpiderClient('https://x', 'k', { fetch: mock.fetch });
+
+  const result = await client.routing.plan({ origin: Location.stop('1:A'), destination: Location.stop('1:B') });
+
+  if (!result.isSuccess) throw new Error(result.error.code);
+  assert.deepEqual(result.data.edges[0].itinerary.legs.map((l) => l.vehicle), [
+    MAPPED_VEHICLE,
+    { id: null, label: null, wheelchairAccessible: null, airConditioning: null, wifi: null, cardPayment: null },
+    null,
+  ]);
+});
+
+test('departures and trip map their vehicle as TripVehicle, and a null vehicle as null', async () => {
+  const boards = mockFetch({
+    json: {
+      stop: {
+        gtfsId: 'U1',
+        name: 'Main',
+        stoptimesWithoutPatterns: [
+          departureRow({ vehicle: { ...WIRE_VEHICLE, wheelchairAccessible: 'NOT_POSSIBLE' } }),
+          departureRow({ vehicle: null }),
+        ],
+      },
+    },
+  });
+  const departures = await new SpiderClient('https://x', 'k', { fetch: boards.fetch }).routing.departures('U1', 5);
+  if (!departures.isSuccess) throw new Error(departures.error.code);
+  assert.deepEqual(departures.data.map((d) => d.vehicle), [{ ...MAPPED_VEHICLE, wheelchairAccessible: 'NOT_POSSIBLE' }, null]);
+
+  const withVehicle = mockFetch({ json: { trip: { ...TRIP_WITHOUT_STOPS.trip, vehicle: WIRE_VEHICLE } } });
+  const trip = await new SpiderClient('https://x', 'k', { fetch: withVehicle.fetch }).routing.trip('1:t1', '2026-07-20');
+  if (!trip.isSuccess) throw new Error(trip.error.code);
+  assert.deepEqual(trip.data?.vehicle, MAPPED_VEHICLE);
+
+  const without = mockFetch({ json: { trip: { ...TRIP_WITHOUT_STOPS.trip, vehicle: null } } });
+  const bare = await new SpiderClient('https://x', 'k', { fetch: without.fetch }).routing.trip('1:t1', '2026-07-20');
+  if (!bare.isSuccess) throw new Error(bare.error.code);
+  assert.equal(bare.data?.vehicle, null);
+});
+
 test('trip sends reliability only when set', async () => {
   const mock = mockFetch({ json: TRIP_WITHOUT_STOPS });
   const client = new SpiderClient('https://x', 'k', { fetch: mock.fetch });
