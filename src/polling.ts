@@ -1,9 +1,14 @@
-import type { SpiderRealtime, VehiclePositions, LiveVehicleUpdate, TripDelays, ServiceAlerts } from './realtime.ts';
+import type { SpiderRealtime, VehiclePositions, LiveVehicleUpdate, TripDelays, TripUpdates, ServiceAlerts } from './realtime.ts';
 import type { SpiderResult } from './result.ts';
 
 export interface PollOptions {
   readonly intervalMs?: number;
   readonly signal?: AbortSignal;
+}
+
+export interface VehicleForTripPollOptions extends PollOptions {
+  /** The run of a frequency-based trip, as {@link SpiderRealtime.vehicleForTrip}'s `startTime`. */
+  readonly startTime?: string;
 }
 
 export function pollVehicles(
@@ -19,11 +24,21 @@ export function pollVehicleForTrip(
   realtime: SpiderRealtime,
   tripId: string,
   serviceDate: string,
-  options?: PollOptions,
+  options?: VehicleForTripPollOptions,
 ): AsyncGenerator<SpiderResult<LiveVehicleUpdate>> {
-  return poll(options, () => realtime.vehicleForTrip(tripId, serviceDate));
+  return poll(options, () => realtime.vehicleForTrip(tripId, serviceDate, options?.startTime));
 }
 
+export function pollTripUpdates(
+  realtime: SpiderRealtime,
+  serviceDate: string,
+  tripIds: readonly string[],
+  options?: PollOptions,
+): AsyncGenerator<SpiderResult<TripUpdates>> {
+  return poll(options, () => realtime.tripUpdates(serviceDate, tripIds));
+}
+
+/** @deprecated Use {@link pollTripUpdates}: `/realtime/v1/delays` is deprecated. */
 export function pollDelays(
   realtime: SpiderRealtime,
   serviceDate: string,

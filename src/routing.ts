@@ -15,7 +15,7 @@ import {
 } from './enums.ts';
 import type { Location, ViaLocation } from './location.ts';
 import { decodePolyline } from './polyline.ts';
-import { invalidServiceDate } from './serviceDate.ts';
+import { invalidServiceDate, invalidStartTime, startTimeOrUndefined } from './serviceDate.ts';
 import type {
   DepartureBoard,
   DeparturesRequest,
@@ -62,7 +62,7 @@ export interface Leg {
   readonly isRealtime: boolean;
   /** The realtime state of the leg's trip; `SCHEDULED` on a walk leg. */
   readonly realtimeState: RealtimeState;
-  /** GTFS service date this leg's trip runs on (ISO `YYYY-MM-DD`) — pass it to {@link SpiderRouting.trip}, {@link SpiderRouting.estimatedDelays} and realtime `delays` and `vehicles`; null on a walk leg. */
+  /** GTFS service date this leg's trip runs on (ISO `YYYY-MM-DD`) — pass it to {@link SpiderRouting.trip}, {@link SpiderRouting.estimatedDelays} and realtime `tripUpdates` and `vehicles`; null on a walk leg. */
   readonly serviceDate: string | null;
   /** The stop's name; `Origin` or `Destination` for a coordinate. */
   readonly fromName: string;
@@ -186,7 +186,7 @@ export interface Departure {
   readonly typicalDelaySeconds: number | null;
   readonly headsign: string | null;
   readonly tripGtfsId: string;
-  /** GTFS service date the trip runs on (ISO `YYYY-MM-DD`) — pass it to {@link SpiderRouting.trip}, {@link SpiderRouting.estimatedDelays} and realtime `delays` and `vehicles`. */
+  /** GTFS service date the trip runs on (ISO `YYYY-MM-DD`) — pass it to {@link SpiderRouting.trip}, {@link SpiderRouting.estimatedDelays} and realtime `tripUpdates` and `vehicles`. */
   readonly serviceDate: string;
   readonly routeGtfsId: string;
   readonly routeShortName: string | null;
@@ -288,6 +288,12 @@ export interface PlanOptions {
   readonly wheelchairAccessible?: boolean;
   /** Plan arrivals with typical delays at this level. Undefined = plan on the timetable. */
   readonly reliability?: Reliability;
+  /**
+   * Never ride these transit modes; every other mode stays usable, including one the API adds later.
+   * Undefined/empty = no filter; WALK/UNKNOWN drop out. Together with a non-empty `allowedTransitModes` it fails as
+   * `bad_request` on `modes.transit` before any request.
+   */
+  readonly excludedTransitModes?: readonly TransitMode[];
 }
 
 /**
@@ -316,6 +322,8 @@ export interface PlanStreamRequestOptions {
    * A smaller value fails as `bad_request` on `maxWindow` before any request.
    */
   readonly maxWindowMinutes: number;
+  /** As {@link PlanOptions.excludedTransitModes}. */
+  readonly excludedTransitModes?: readonly TransitMode[];
 }
 
 export interface DeparturesOptions {
@@ -325,6 +333,12 @@ export interface DeparturesOptions {
   readonly timeRangeSeconds?: number;
   /** The level {@link Departure.typicalDelaySeconds} is given at. Undefined = none, and it is null. */
   readonly reliability?: Reliability;
+  /**
+   * Leave out departures of these modes. The API drops them before it counts `numberOfDepartures`, so the board,
+   * and each later one paged by `startTime`, still holds up to that many departures of the other modes.
+   * Undefined/empty = no filter; WALK/UNKNOWN drop out.
+   */
+  readonly excludedModes?: readonly TransitMode[];
 }
 
 const PLAN_PATH = '/routing/v1/plan';
@@ -364,6 +378,7 @@ interface PlanRequest {
   readonly searchWindowMinutes: number;
   readonly wheelchairAccessible: boolean;
   readonly reliability?: Reliability;
+  readonly excludedTransitModes: readonly TransitMode[];
 }
 
 const ROUTE_REQUEST = Symbol('spider.routeRequest');
@@ -390,8 +405,9 @@ export class SpiderRouting {
       searchWindowMinutes: options.searchWindowMinutes ?? DEFAULT_SEARCH_WINDOW_MINUTES,
       wheelchairAccessible: options.wheelchairAccessible ?? false,
       reliability: options.reliability,
+      excludedTransitModes: options.excludedTransitModes ?? [],
     };
-    const invalid = invalidVia(request.via);
+    const invalid = invalidModes(request.allowedTransitModes, request.excludedTransitModes) ?? invalidVia(request.via);
     if (invalid != null) return failure(invalid);
     return this.page(request);
   }
@@ -441,7 +457,7 @@ export class SpiderRouting {
       origin: locationToInput(options.origin),
       destination: locationToInput(options.destination),
       via: via.length > 0 ? via.map(viaToInput) : undefined,
-      modes: modesInput(options.allowedTransitModes ?? []),
+      modes: modesInput(options.allowedTransitModes ?? [], options.excludedTransitModes ?? []),
       preferences: preferencesInput({
         maxTransfers: options.maxTransfers,
         wheelchairAccessible: options.wheelchairAccessible ?? false,
@@ -535,6 +551,7 @@ export class SpiderRouting {
         startTime: options?.startTime != null ? Math.floor(toEpochMs(options.startTime) / 1000) : undefined,
         timeRange,
         reliability: options?.reliability,
+        excludeModes: wireModesOrUndefined(options?.excludedModes ?? []),
       };
       const stop = (await this.transport.postJson<DeparturesResponse>(DEPARTURES_PATH, body)).stop;
       if (stop == null) {
@@ -549,13 +566,16 @@ export class SpiderRouting {
   /**
    * One trip run: the trip on one service date (ISO `YYYY-MM-DD`, a {@link Leg.serviceDate} or
    * {@link Departure.serviceDate}). `reliability` is the level {@link TripStop.typicalDelaySeconds} is given at;
-   * undefined = none, and it is null. A malformed date fails as `bad_request` without a request.
+   * undefined = none, and it is null. `startTime` picks the run of a frequency-based trip by its start time, a GTFS
+   * time `H:MM:SS` or `HH:MM:SS` (the realtime `startTime`); undefined or empty = the trip's first
+   * run on `serviceDate`, and a time no run starts at is an unknown trip (`not_found`). A malformed date or start time
+   * fails as `bad_request` without a request.
    */
-  async trip(tripId: string, serviceDate: string, reliability?: Reliability): Promise<SpiderResult<TripDetails>> {
-    const invalid = invalidServiceDate(serviceDate);
+  async trip(tripId: string, serviceDate: string, reliability?: Reliability, startTime?: string): Promise<SpiderResult<TripDetails>> {
+    const invalid = invalidServiceDate(serviceDate) ?? invalidStartTime(startTime);
     if (invalid != null) return failure(invalid);
     try {
-      const body: TripRequest = { id: tripId, serviceDate, reliability };
+      const body: TripRequest = { id: tripId, serviceDate, startTime: startTimeOrUndefined(startTime), reliability };
       const trip = (await this.transport.postJson<TripResponse>(TRIP_PATH, body)).trip;
       if (trip == null) {
         throw new TransportError('no_data', `routing returned no trip for id=${tripId}`);
@@ -569,16 +589,24 @@ export class SpiderRouting {
   /**
    * The delay history at one stop of one trip run: `serviceDate` as for {@link trip}, `stopPosition` a
    * {@link TripStop.stopPosition}. Null (a success) for an unknown trip, a stop position not on the trip, or no
-   * history. A malformed date fails as `bad_request` without a request.
+   * history. `startTime` picks the run of a frequency-based trip, as for {@link trip}; a time no run starts at is null.
+   * A malformed date or start time fails as `bad_request` without a request.
    */
-  async estimatedDelays(tripId: string, serviceDate: string, stopPosition: number): Promise<SpiderResult<EstimatedDelays | null>> {
-    const invalid = invalidServiceDate(serviceDate);
+  async estimatedDelays(
+    tripId: string,
+    serviceDate: string,
+    stopPosition: number,
+    startTime?: string,
+  ): Promise<SpiderResult<EstimatedDelays | null>> {
+    const invalid = invalidServiceDate(serviceDate) ?? invalidStartTime(startTime);
     if (invalid != null) return failure(invalid);
+    const run = startTimeOrUndefined(startTime);
     try {
       const dto = await this.transport.getJson<EstimatedDelaysResponse>(ESTIMATED_DELAYS_PATH, {
         tripId,
         serviceDate,
         stopPosition: String(stopPosition),
+        ...(run !== undefined ? { startTime: run } : {}),
       });
       return success(mapEstimatedDelays(dto));
     } catch (e) {
@@ -604,7 +632,7 @@ export class SpiderRouting {
       origin: locationToInput(request.origin),
       destination: locationToInput(request.destination),
       via: request.via.length > 0 ? request.via.map(viaToInput) : undefined,
-      modes: modesInput(request.allowedTransitModes),
+      modes: modesInput(request.allowedTransitModes, request.excludedTransitModes),
       preferences: preferencesInput(request),
       searchWindow: `PT${Math.floor(request.searchWindowMinutes)}M`,
       reliability: request.reliability,
@@ -646,7 +674,12 @@ function invalidStreamOptions(options: PlanStreamRequestOptions): SpiderError | 
   // Required by the type; a plain-JS caller can still omit it, and `PTNaNM` must never reach the wire.
   if (options.maxWindowMinutes == null) return badRequest('maxWindow', 'is required');
   if (!(Math.floor(options.maxWindowMinutes) >= MIN_STREAM_WINDOW_MINUTES)) return badRequest('maxWindow');
-  return invalidVia(options.via ?? []);
+  return invalidModes(options.allowedTransitModes ?? [], options.excludedTransitModes ?? []) ?? invalidVia(options.via ?? []);
+}
+
+// The API takes an allow-list or an exclude-list, never both non-empty: the same field and wording as its own 400.
+function invalidModes(allowed: readonly TransitMode[], excluded: readonly TransitMode[]): SpiderError | null {
+  return wireModes(allowed).length > 0 && wireModes(excluded).length > 0 ? badRequest('modes.transit', 'is invalid') : null;
 }
 
 function invalidVia(via: readonly ViaLocation[]): SpiderError | null {
@@ -678,11 +711,19 @@ function viaToInput(via: ViaLocation): PlanViaLocationInput {
 
 // Curated PlanRequest → OTP's nested modes/preferences inputs. Only the exposed fields are set; everything
 // else stays undefined so OTP applies its own defaults. Both return undefined when nothing is requested.
-function modesInput(modes: readonly TransitMode[]): PlanModesInput | undefined {
-  const transit = modes
-    .filter((m) => WIRE_TRANSIT_MODES.has(m))
-    .map((mode) => ({ mode: mode as WireTransitMode }));
-  return transit.length > 0 ? { transit: { transit } } : undefined;
+function modesInput(allowed: readonly TransitMode[], excluded: readonly TransitMode[]): PlanModesInput | undefined {
+  const transit = wireModesOrUndefined(allowed)?.map((mode) => ({ mode }));
+  const exclude = wireModesOrUndefined(excluded);
+  return transit !== undefined || exclude !== undefined ? { transit: { transit, exclude } } : undefined;
+}
+
+function wireModes(modes: readonly TransitMode[]): WireTransitMode[] {
+  return modes.filter((m) => WIRE_TRANSIT_MODES.has(m)) as WireTransitMode[];
+}
+
+function wireModesOrUndefined(modes: readonly TransitMode[]): WireTransitMode[] | undefined {
+  const wire = wireModes(modes);
+  return wire.length > 0 ? wire : undefined;
 }
 
 function preferencesInput(request: { maxTransfers?: number; wheelchairAccessible: boolean }): PlanPreferencesInput | undefined {

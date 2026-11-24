@@ -441,3 +441,56 @@ function sseFetch(frames: readonly string[]): { fetch: FetchLike; calls: Capture
   };
   return { fetch: fetch as FetchLike, calls };
 }
+
+test('planStream and its continuations send excludedTransitModes as modes.transit.exclude', async () => {
+  const mock = sseFetch([PAGE_INFO_FRAME, DONE_FRAME]);
+  const client = new SpiderClient('https://x', 'k', { fetch: mock.fetch });
+  const options: PlanStreamRequestOptions = {
+    origin: Location.stop('1:A'),
+    destination: Location.stop('1:B'),
+    departAt: new Date('2026-07-15T08:00:00Z'),
+    targetResults: 5,
+    maxWindowMinutes: 120,
+    excludedTransitModes: ['TRAM', 'WALK', 'UNKNOWN'],
+  };
+
+  await collect(client.routing.planStream(options));
+  await collect(client.routing.planStreamNext(options, 'c-end'));
+  await collect(client.routing.planStreamPrevious(options, 'c-start'));
+  await collect(client.routing.planStream({ ...options, excludedTransitModes: [] }));
+  await collect(client.routing.planStream({ ...options, allowedTransitModes: ['WALK'], excludedTransitModes: ['TRAM'] }));
+
+  const body = '{"dateTime":{"earliestDeparture":"2026-07-15T08:00:00.000Z"},'
+    + '"origin":{"location":{"stopLocation":{"stopLocationId":"1:A"}}},'
+    + '"destination":{"location":{"stopLocation":{"stopLocationId":"1:B"}}},'
+    + '"modes":{"transit":{"exclude":["TRAM"]}},'
+    + '"targetResults":5,"maxWindow":"PT120M"';
+  assert.equal(mock.calls[0].body, body + '}');
+  assert.equal(mock.calls[1].body, body + ',"after":"c-end"}');
+  assert.equal(mock.calls[2].body, body + ',"before":"c-start"}');
+  assert.equal('modes' in JSON.parse(mock.calls[3].body), false);
+  assert.equal(mock.calls[4].body, body + '}');
+});
+
+test('planStream and its continuations with both allowed and excluded transit modes fail on modes.transit before any request', async () => {
+  const mock = sseFetch([PAGE_INFO_FRAME, DONE_FRAME]);
+  const client = new SpiderClient('https://x', 'k', { fetch: mock.fetch });
+  const options = { ...STREAM_OPTIONS, allowedTransitModes: ['BUS'], excludedTransitModes: ['TRAM'] } as const;
+
+  for (const stream of [
+    client.routing.planStream(options),
+    client.routing.planStreamNext(options, 'c'),
+    client.routing.planStreamPrevious(options, 'c'),
+  ]) {
+    const events = await collect(stream);
+    assert.equal(events.length, 1);
+    const ev = events[0];
+    assert.equal(ev.type, 'failure');
+    if (ev.type === 'failure') {
+      assert.equal(ev.error.code, 'bad_request');
+      assert.equal(ev.error.field, 'modes.transit');
+      assert.equal(ev.error.message, 'modes.transit is invalid');
+    }
+  }
+  assert.equal(mock.calls.length, 0);
+});

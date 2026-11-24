@@ -2,8 +2,8 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Tiducto Transit API — Realtime",
-    "version": "1.9",
-    "description": "GTFS-RT live data (vehicles, delays, alerts), poll-based and key-authenticated. Companion to routing, stops and places; the four share one pack version. A member that has no value is absent, never null. A GTFS-RT enum value the decoder doesn't recognise is omitted. Every id in a response is feed-prefixed (`<feedId>:<id>`), exactly as routing's `gtfsId` and stop search return it, and an id in a request is used exactly as sent: a raw id, or one with another feed's prefix, is unknown. A query parameter not listed is a 400 `<name> is not allowed`, and a repeated one a 400 `<name> is invalid`. A method an operation doesn't take is a 405 `method_not_allowed`, `POST /realtime/v1/delays` included, and a path under `/realtime/v1/` that matches no operation is a 404 `not_found`. A response may come from a shared cache keyed by host, URL and `apikey`; such a response is not metered. Any other path that matches no operation, and every path of an environment without a realtime deployment, is the gateway's plain-text `404 Not Found`, outside every operation."
+    "version": "1.10",
+    "description": "GTFS-RT live data (vehicles, trip updates, alerts), poll-based and key-authenticated. Companion to routing, stops and places; the four share one pack version. A member that has no value is absent, never null. A GTFS-RT enum value the decoder doesn't recognise is omitted. Every id in a response is feed-prefixed (`<feedId>:<id>`), exactly as routing's `gtfsId` and stop search return it, and an id in a request is used exactly as sent: a raw id, or one with another feed's prefix, is unknown. A query parameter not listed is a 400 `<name> is not allowed`, and a repeated one a 400 `<name> is invalid`. A method an operation doesn't take is a 405 `method_not_allowed`, `POST /realtime/v1/trip-updates` and `POST /realtime/v1/delays` included, and a path under `/realtime/v1/` that matches no operation is a 404 `not_found`. A response may come from a shared cache keyed by host, URL and `apikey`; such a response is not metered. Any other path that matches no operation, and every path of an environment without a realtime deployment, is the gateway's plain-text `404 Not Found`, outside every operation."
   },
   "servers": [
     {
@@ -25,7 +25,7 @@
     "/realtime/v1/vehicles": {
       "get": {
         "summary": "Realtime Vehicles",
-        "description": "Live vehicle positions for the given trips on one service date, at most one per trip.\n- `serviceDate` is required: the GTFS service date, ISO-8601 `YYYY-MM-DD`, the same value a plan leg's, departure's or trip's `serviceDate` carries. Absent or empty is a 400 `serviceDate is required`, and a value that is not an ISO date a 400 `serviceDate is invalid`.\n- A vehicle is returned only while it runs the trip on that service date, so a future date has none; each vehicle's `serviceDate` names the trip run it is on.\n- `tripIds` is required: 1 to 50 comma-separated trip ids, each used exactly as sent and counted as sent. Absent or empty is a 400 `tripIds is required`, a blank entry (as in `1:39822,` or a space) a 400 `tripIds is invalid`, more than 50 a 400 `tripIds is out of range`.\n- Ids are feed-prefixed (`<feedId>:<id>`), exactly as routing returns them; a raw id or another feed's id is unknown and listed in `missing`.\n- A query parameter not listed is a 400 `<name> is not allowed`, and a repeated one a 400 `<name> is invalid`.\n- The response carries `ETag`, `Cache-Control: public, max-age=<poll interval>, must-revalidate` and `Vary: apikey`; a request whose `If-None-Match` matches the `ETag` is a 304 without a body.",
+        "description": "Live vehicle positions for the given trips on one service date, at most one per trip run.\n- A frequency-based trip (`frequencies.txt`) has several runs under one trip id, told apart by the feed's `start_time`: each run's vehicle is its own item, with its `startTime`, in order of `startTime` (a run without one first). `missing` lists the requested trip ids with no vehicle on any run.\n- `serviceDate` is required: the GTFS service date, ISO-8601 `YYYY-MM-DD`, the same value a plan leg's, departure's or trip's `serviceDate` carries. Absent or empty is a 400 `serviceDate is required`, and a value that is not an ISO date a 400 `serviceDate is invalid`.\n- A vehicle is returned only while it runs the trip on that service date, so a future date has none; each vehicle's `serviceDate` names the trip run it is on.\n- `wheelchairAccessible`, `airConditioning`, `wifi` and `cardPayment` describe the vehicle the feed reports for the trip; each is absent when the feed doesn't say.\n- `tripIds` is required: 1 to 50 comma-separated trip ids, each used exactly as sent and counted as sent. Absent or empty is a 400 `tripIds is required`, a blank entry (as in `1:39822,` or a space) a 400 `tripIds is invalid`, more than 50 a 400 `tripIds is out of range`.\n- Ids are feed-prefixed (`<feedId>:<id>`), exactly as routing returns them; a raw id or another feed's id is unknown and listed in `missing`.\n- A query parameter not listed is a 400 `<name> is not allowed`, and a repeated one a 400 `<name> is invalid`.\n- The response carries `ETag`, `Cache-Control: public, max-age=<poll interval>, must-revalidate` and `Vary: apikey`; a request whose `If-None-Match` matches the `ETag` is a 304 without a body.",
         "operationId": "realtime_vehicles",
         "x-surface": "realtime",
         "parameters": [
@@ -51,7 +51,7 @@
         ],
         "responses": {
           "200": {
-            "description": "Positions found for the requested service date, plus feed freshness; a requested id with no live vehicle on that service date, an unknown one included, is listed in `missing`.",
+            "description": "Positions found for the requested service date, one per live trip run, plus feed freshness; a requested id with no live vehicle on that service date, an unknown one included, is listed in `missing`.",
             "headers": {
               "ETag": {
                 "description": "The snapshot's entity tag; absent until the feed has reported.",
@@ -92,7 +92,11 @@
                       "stopId": "1:U1660Z3",
                       "currentStatus": "INCOMING_AT",
                       "occupancyStatus": "MANY_SEATS_AVAILABLE",
-                      "timestamp": 1790056795
+                      "timestamp": 1790056795,
+                      "wheelchairAccessible": "WHEELCHAIR_ACCESSIBLE",
+                      "airConditioning": true,
+                      "wifi": false,
+                      "cardPayment": true
                     }
                   ],
                   "missing": [
@@ -213,7 +217,7 @@
     "/realtime/v1/vehicles/by-trip/{id}": {
       "get": {
         "summary": "Realtime Vehicle By Trip",
-        "description": "Live vehicle for a single trip on one service date. Always 200 with a freshness envelope; `vehicle` is absent when none is currently reporting, a normal state, never a 404.\n- `serviceDate` is required: the GTFS service date, ISO-8601 `YYYY-MM-DD`, the same value a plan leg's, departure's or trip's `serviceDate` carries. Absent or empty is a 400 `serviceDate is required`, and a value that is not an ISO date a 400 `serviceDate is invalid`.\n- A vehicle is returned only while it runs the trip on that service date, so a future date has none; its `serviceDate` names the trip run it is on.\n- Ids are feed-prefixed (`<feedId>:<id>`), exactly as routing returns them; a raw id or another feed's id is unknown: `vehicle` is absent for it.\n- A query parameter not listed is a 400 `<name> is not allowed`, and a repeated one a 400 `<name> is invalid`.\n- The response carries `ETag`, `Cache-Control: public, max-age=<poll interval>, must-revalidate` and `Vary: apikey`; a request whose `If-None-Match` matches the `ETag` is a 304 without a body.",
+        "description": "Live vehicle for a single trip on one service date. Always 200 with a freshness envelope; `vehicle` is absent when none is currently reporting, a normal state, never a 404.\n- `serviceDate` is required: the GTFS service date, ISO-8601 `YYYY-MM-DD`, the same value a plan leg's, departure's or trip's `serviceDate` carries. Absent or empty is a 400 `serviceDate is required`, and a value that is not an ISO date a 400 `serviceDate is invalid`.\n- A vehicle is returned only while it runs the trip on that service date, so a future date has none; its `serviceDate` names the trip run it is on.\n- `startTime` is optional: a GTFS time `H:MM:SS` or `HH:MM:SS`, hours up to 99, that selects the run of a frequency-based trip (`frequencies.txt`) the feed reports with that `start_time`, compared as a time (`8:10:00` is `08:10:00`). `vehicle` is absent when no run has it, and for a run the feed reports without a start time. Omitted, the answer is the trip's run with the earliest `startTime`, a run without one counting as earliest, so a trip that is not frequency-based answers as before. Empty counts as omitted, as for every parameter here; any other value not of that form is a 400 `startTime is invalid`.\n- `wheelchairAccessible`, `airConditioning`, `wifi` and `cardPayment` describe the vehicle the feed reports for the trip; each is absent when the feed doesn't say.\n- Ids are feed-prefixed (`<feedId>:<id>`), exactly as routing returns them; a raw id or another feed's id is unknown: `vehicle` is absent for it.\n- A query parameter not listed is a 400 `<name> is not allowed`, and a repeated one a 400 `<name> is invalid`.\n- The response carries `ETag`, `Cache-Control: public, max-age=<poll interval>, must-revalidate` and `Vary: apikey`; a request whose `If-None-Match` matches the `ETag` is a 304 without a body.",
         "operationId": "realtime_vehicle_by_trip",
         "x-surface": "realtime",
         "parameters": [
@@ -235,11 +239,20 @@
               "type": "string",
               "format": "date"
             }
+          },
+          {
+            "name": "startTime",
+            "in": "query",
+            "description": "The run of a frequency-based trip (`frequencies.txt`) to answer, by the start time the feed reports it with: a GTFS time `H:MM:SS` or `HH:MM:SS` (hours up to 99), compared as a time. Omitted or empty, the trip's run with the earliest `startTime` is answered, a run without one counting as earliest. Any other value not of that form is a 400 `startTime is invalid`.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
           }
         ],
         "responses": {
           "200": {
-            "description": "Feed freshness plus the live vehicle, when one is reporting for the trip on the requested service date; `vehicle` is absent for a trip with none or an unknown id, a normal state rather than an error.",
+            "description": "Feed freshness plus the live vehicle, when one is reporting for the trip run on the requested service date; `vehicle` is absent for a trip or run with none or an unknown id, a normal state rather than an error.",
             "headers": {
               "ETag": {
                 "description": "The snapshot's entity tag; absent until the feed has reported.",
@@ -269,6 +282,7 @@
                   "vehicle": {
                     "tripId": "1:39822",
                     "serviceDate": "2026-09-22",
+                    "startTime": "08:10:00",
                     "routeId": "1:L41D99",
                     "vehicleId": "1:7103",
                     "label": "7103",
@@ -279,7 +293,11 @@
                     "stopId": "1:U1660Z3",
                     "currentStatus": "INCOMING_AT",
                     "occupancyStatus": "MANY_SEATS_AVAILABLE",
-                    "timestamp": 1790056795
+                    "timestamp": 1790056795,
+                    "wheelchairAccessible": "WHEELCHAIR_ACCESSIBLE",
+                    "airConditioning": true,
+                    "wifi": false,
+                    "cardPayment": true
                   },
                   "feedTimestamp": 1790056800,
                   "staleSeconds": 4
@@ -311,7 +329,270 @@
             }
           },
           "400": {
-            "description": "`serviceDate` absent or empty is `serviceDate is required`, and not an ISO date `serviceDate is invalid`. A query parameter not listed is `<name> is not allowed`, and a repeated one `<name> is invalid`; `field` names it.",
+            "description": "`serviceDate` absent or empty is `serviceDate is required`, and not an ISO date `serviceDate is invalid`. `startTime` not a GTFS time is `startTime is invalid`. A query parameter not listed is `<name> is not allowed`, and a repeated one `<name> is invalid`; `field` names it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "The `apikey` header is missing (`key_missing`) or holds no valid key (`key_invalid`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The key is not allowed on this operation (`key_not_allowed`), or the agreement it belongs to is inactive (`agreement_inactive`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "The key's rate limit is reached (`rate_limited`).",
+            "headers": {
+              "Retry-After": {
+                "description": "Seconds until a request is admitted again.",
+                "schema": {
+                  "type": "integer"
+                }
+              },
+              "X-RateLimit-Limit": {
+                "description": "Requests the key may make per rate-limit window.",
+                "schema": {
+                  "type": "integer"
+                }
+              },
+              "X-RateLimit-Reset": {
+                "description": "Unix seconds at which the rate-limit window resets.",
+                "schema": {
+                  "type": "integer"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "description": "Another client error: 404 `not_found`, 405 `method_not_allowed`, 411 `length_required` (a body without a length) or 413 `payload_too_large`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "5XX": {
+            "description": "From Spider, an ErrorResponse: `internal_error`, `upstream_unavailable` or `upstream_timeout`. A network intermediary in front of Spider may answer a 5XX with a body that is not JSON.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/realtime/v1/trip-updates": {
+      "get": {
+        "summary": "Realtime Trip Updates",
+        "description": "Live trip updates for trips on one service date, resolved per trip run (trip id + service date + the feed's start time): each run's schedule deviation, its GTFS-RT schedule relationship and its stop-time updates, and the trip modifications (detours) that select it. The successor of `GET /realtime/v1/delays`, with the same parameters and errors; its body lists the runs in `tripUpdates` (`delays` there), each with its `startTime` and `modifications`, and a trip with several runs has one item per run.\n- A frequency-based trip (`frequencies.txt`) has several runs under one trip id, told apart by the feed's `start_time`: each live run is its own item, with its `startTime`, in order of `startTime` (a run without one first). `missing` lists the requested trip ids with no run.\n- Trip modifications are experimental, as in GTFS-RT: a `TripModifications` entity applies to a trip run when its `selected_trips` name the trip and its `service_dates` hold the service date; one with `start_times` applies only to the runs whose `startTime` is one of them (never to a run without a `startTime`), one without to every run of the trip. A run that modifications select and no trip update reports is returned with empty `stopTimeUpdates`: one per listed start time without a reported run, or one without `startTime` when the trip has no run at all. Such a trip is not listed in `missing`.\n- A replacement stop the feed defines as a realtime `Stop` entity carries its `name`, `latitude` and `longitude`; the modified trip's `shape` is the encoded polyline of the feed's `Shape` entity it names.\n- `serviceDate` is the GTFS service date, ISO-8601 `YYYY-MM-DD`: the same value a plan leg's, departure's or trip's `serviceDate` carries. GTFS times may exceed 24:00, so a service date can differ from the departure's calendar date.\n- `serviceDate` and `tripIds` are required; absent or empty is a 400 `<name> is required`.\n- `tripIds` is 1 to 50 comma-separated trip ids, each used exactly as sent and counted as sent. A blank entry (as in `1:39822,` or a space) is a 400 `tripIds is invalid`, more than 50 a 400 `tripIds is out of range`.\n- Ids are feed-prefixed (`<feedId>:<id>`), exactly as routing returns them; a raw id or another feed's id is unknown and listed in `missing`.\n- A query parameter not listed is a 400 `<name> is not allowed`, and a repeated one a 400 `<name> is invalid`. Another method, `POST` included, is a 405 `method_not_allowed`.\n- A trip instance the feed doesn't hold for that service date comes back in `missing`, never painted with another day's update.\n- The response carries `ETag`, `Cache-Control: public, max-age=<poll interval>, must-revalidate` and `Vary: apikey`; a request whose `If-None-Match` matches the `ETag` is a 304 without a body.",
+        "operationId": "realtime_trip_updates",
+        "x-surface": "realtime",
+        "parameters": [
+          {
+            "name": "serviceDate",
+            "in": "query",
+            "description": "GTFS service date, ISO-8601 `YYYY-MM-DD`: the same value a plan leg's, departure's or trip's `serviceDate` carries. Absent or empty is a 400 `serviceDate is required`, and a value that is not an ISO date `serviceDate is invalid`.",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "date"
+            }
+          },
+          {
+            "name": "tripIds",
+            "in": "query",
+            "description": "1 to 50 comma-separated feed-prefixed trip ids (`<feedId>:<id>`), each used exactly as sent (never trimmed) and counted as sent. Absent or empty is a 400 `tripIds is required`, a blank entry (as in `1:39822,` or a space) `tripIds is invalid`, and more than 50 ids `tripIds is out of range`.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Trip updates and trip modifications for the requested service date, one item per trip run, plus feed freshness; a requested id with neither a live update nor a trip modification, an unknown one included, is listed in `missing`.",
+            "headers": {
+              "ETag": {
+                "description": "The snapshot's entity tag; absent until the feed has reported.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Cache-Control": {
+                "description": "`public, max-age=<the feed's poll interval in seconds>, must-revalidate`; `public, max-age=5` until the feed has reported.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Vary": {
+                "description": "`apikey`: a shared cache keys the response by host, URL and `apikey`.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TripUpdatesResponse"
+                },
+                "example": {
+                  "serviceDate": "2026-09-22",
+                  "tripUpdates": [
+                    {
+                      "tripId": "1:39822",
+                      "routeId": "1:L41D99",
+                      "delaySeconds": 120,
+                      "scheduleRelationship": "SCHEDULED",
+                      "stopTimeUpdates": [
+                        {
+                          "stopId": "1:U1155Z1",
+                          "stopSequence": 5,
+                          "arrivalDelay": 60,
+                          "departureDelay": 90,
+                          "scheduleRelationship": "SCHEDULED"
+                        },
+                        {
+                          "stopId": "1:U1660Z3",
+                          "stopSequence": 6,
+                          "arrivalDelay": 120,
+                          "scheduleRelationship": "SCHEDULED"
+                        }
+                      ],
+                      "modifications": [
+                        {
+                          "id": "1:detour-kounicova",
+                          "startStop": {
+                            "stopSequence": 7,
+                            "stopId": "1:U1161Z1"
+                          },
+                          "endStop": {
+                            "stopSequence": 8,
+                            "stopId": "1:U1162Z1"
+                          },
+                          "replacementStops": [
+                            {
+                              "stopId": "1:detour-stop-1",
+                              "travelTimeToStop": 120,
+                              "name": "Kounicova (temporary)",
+                              "latitude": 49.2051,
+                              "longitude": 16.5977
+                            },
+                            {
+                              "stopId": "1:U1163Z1",
+                              "travelTimeToStop": 240
+                            }
+                          ],
+                          "propagatedModificationDelay": 60,
+                          "alertId": "1:alert-kounicova",
+                          "lastModifiedTime": 1790050000,
+                          "shape": "{eikHk_idB_DvG{ErD"
+                        }
+                      ]
+                    },
+                    {
+                      "tripId": "1:39824",
+                      "startTime": "08:10:00",
+                      "stopTimeUpdates": [],
+                      "modifications": [
+                        {
+                          "id": "1:detour-kounicova-frequent",
+                          "startTimes": [
+                            "08:10:00"
+                          ],
+                          "startStop": {
+                            "stopSequence": 7,
+                            "stopId": "1:U1161Z1"
+                          },
+                          "endStop": {
+                            "stopSequence": 8,
+                            "stopId": "1:U1162Z1"
+                          },
+                          "replacementStops": [
+                            {
+                              "stopId": "1:detour-stop-1",
+                              "travelTimeToStop": 120,
+                              "name": "Kounicova (temporary)",
+                              "latitude": 49.2051,
+                              "longitude": 16.5977
+                            },
+                            {
+                              "stopId": "1:U1163Z1",
+                              "travelTimeToStop": 240
+                            }
+                          ],
+                          "propagatedModificationDelay": 60,
+                          "alertId": "1:alert-kounicova",
+                          "lastModifiedTime": 1790050000,
+                          "shape": "{eikHk_idB_DvG{ErD"
+                        }
+                      ]
+                    }
+                  ],
+                  "missing": [
+                    "1:39823"
+                  ],
+                  "feedTimestamp": 1790056800,
+                  "staleSeconds": 4
+                }
+              }
+            }
+          },
+          "304": {
+            "description": "The snapshot is unchanged: `If-None-Match` matches the current `ETag` under RFC 9110 weak comparison (`W/` tags, lists and `*` included). No body; `ETag`, `Cache-Control` and `Vary` as on a 200.",
+            "headers": {
+              "ETag": {
+                "description": "The snapshot's entity tag; absent until the feed has reported.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Cache-Control": {
+                "description": "`public, max-age=<the feed's poll interval in seconds>, must-revalidate`; `public, max-age=5` until the feed has reported.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Vary": {
+                "description": "`apikey`: a shared cache keys the response by host, URL and `apikey`.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`serviceDate` absent or empty is `serviceDate is required`, and not an ISO date `serviceDate is invalid`. `tripIds` absent or empty is `tripIds is required`, a blank entry `tripIds is invalid`, and more than 50 ids `tripIds is out of range`. A query parameter not listed is `<name> is not allowed`, and a repeated one `<name> is invalid`; `field` names it.",
             "content": {
               "application/json": {
                 "schema": {
@@ -396,7 +677,7 @@
     "/realtime/v1/delays": {
       "get": {
         "summary": "Realtime Delays",
-        "description": "Live schedule deviation for trips on one service date, resolved per trip instance (trip id + service date).\n- `serviceDate` is the GTFS service date, ISO-8601 `YYYY-MM-DD`: the same value a plan leg's, departure's or trip's `serviceDate` carries. GTFS times may exceed 24:00, so a service date can differ from the departure's calendar date.\n- `serviceDate` and `tripIds` are required; absent or empty is a 400 `<name> is required`.\n- `tripIds` is 1 to 50 comma-separated trip ids, each used exactly as sent and counted as sent. A blank entry (as in `1:39822,` or a space) is a 400 `tripIds is invalid`, more than 50 a 400 `tripIds is out of range`.\n- Ids are feed-prefixed (`<feedId>:<id>`), exactly as routing returns them; a raw id or another feed's id is unknown and listed in `missing`.\n- A query parameter not listed is a 400 `<name> is not allowed`, and a repeated one a 400 `<name> is invalid`. Another method, `POST` included, is a 405 `method_not_allowed`.\n- A trip instance the feed doesn't hold for that service date comes back in `missing`, never painted with another day's delay.\n- The response carries `ETag`, `Cache-Control: public, max-age=<poll interval>, must-revalidate` and `Vary: apikey`; a request whose `If-None-Match` matches the `ETag` is a 304 without a body.",
+        "description": "**Deprecated:** use its successor `GET /realtime/v1/trip-updates`, which takes the same parameters and answers the same body with `delays` named `tripUpdates`, each trip also carrying its trip modifications. This operation keeps working, unchanged, until it is retired with notice under the contract's deprecation window.\nLive schedule deviation for trips on one service date, resolved per trip instance (trip id + service date).\n- One item per requested trip id. A frequency-based trip (`frequencies.txt`) whose runs the feed tells apart by `start_time` answers its run with the earliest start time, a run without one counting as earliest; `GET /realtime/v1/trip-updates` lists every run.\n- `serviceDate` is the GTFS service date, ISO-8601 `YYYY-MM-DD`: the same value a plan leg's, departure's or trip's `serviceDate` carries. GTFS times may exceed 24:00, so a service date can differ from the departure's calendar date.\n- `serviceDate` and `tripIds` are required; absent or empty is a 400 `<name> is required`.\n- `tripIds` is 1 to 50 comma-separated trip ids, each used exactly as sent and counted as sent. A blank entry (as in `1:39822,` or a space) is a 400 `tripIds is invalid`, more than 50 a 400 `tripIds is out of range`.\n- Ids are feed-prefixed (`<feedId>:<id>`), exactly as routing returns them; a raw id or another feed's id is unknown and listed in `missing`.\n- A query parameter not listed is a 400 `<name> is not allowed`, and a repeated one a 400 `<name> is invalid`. Another method, `POST` included, is a 405 `method_not_allowed`.\n- A trip instance the feed doesn't hold for that service date comes back in `missing`, never painted with another day's delay.\n- The response carries `ETag`, `Cache-Control: public, max-age=<poll interval>, must-revalidate` and `Vary: apikey`; a request whose `If-None-Match` matches the `ETag` is a 304 without a body.",
         "operationId": "realtime_delays",
         "x-surface": "realtime",
         "parameters": [
@@ -422,7 +703,7 @@
         ],
         "responses": {
           "200": {
-            "description": "Delays for the requested service date, plus feed freshness; a requested id with no live delay, an unknown one included, is listed in `missing`.",
+            "description": "Deprecated: `GET /realtime/v1/trip-updates` answers the same body with `delays` named `tripUpdates`, each trip also carrying its trip modifications. Delays for the requested service date, plus feed freshness; a requested id with no live delay, an unknown one included, is listed in `missing`.",
             "headers": {
               "ETag": {
                 "description": "The snapshot's entity tag; absent until the feed has reported.",
@@ -823,7 +1104,7 @@
       },
       "Vehicle": {
         "type": "object",
-        "description": "A vehicle's live position, at most one per trip. A member the producer doesn't report is absent. `tripId`, `routeId`, `stopId` and `vehicleId` are feed-prefixed (`<feedId>:<id>`).",
+        "description": "A vehicle's live position and features, at most one per trip. A member the producer doesn't report is absent. `tripId`, `routeId`, `stopId` and `vehicleId` are feed-prefixed (`<feedId>:<id>`).",
         "properties": {
           "tripId": {
             "type": "string"
@@ -831,6 +1112,10 @@
           "serviceDate": {
             "type": "string",
             "description": "GTFS service date of the trip run the vehicle is on, ISO-8601 `YYYY-MM-DD`."
+          },
+          "startTime": {
+            "type": "string",
+            "description": "Start time of the trip run, as the feed's GTFS-RT `start_time` gives it: a GTFS time `HH:MM:SS` that may exceed `24:00:00`. It tells apart the runs of a frequency-based trip (`frequencies.txt`); absent when the feed gives none."
           },
           "routeId": {
             "type": "string"
@@ -887,6 +1172,27 @@
             "type": "integer",
             "format": "int64",
             "description": "Epoch seconds of the position; absent when the producer doesn't report it."
+          },
+          "wheelchairAccessible": {
+            "type": "string",
+            "description": "GTFS-RT `VehicleDescriptor.WheelchairAccessible` of the vehicle reported for the trip; absent for `NO_VALUE`.",
+            "enum": [
+              "UNKNOWN",
+              "WHEELCHAIR_ACCESSIBLE",
+              "WHEELCHAIR_INACCESSIBLE"
+            ]
+          },
+          "airConditioning": {
+            "type": "boolean",
+            "description": "Whether the vehicle reported for the trip is air-conditioned; absent when unknown."
+          },
+          "wifi": {
+            "type": "boolean",
+            "description": "Whether the vehicle reported for the trip offers Wi-Fi; absent when unknown."
+          },
+          "cardPayment": {
+            "type": "boolean",
+            "description": "Whether the vehicle reported for the trip accepts card payment on board; absent when unknown."
           }
         },
         "required": [
@@ -896,9 +1202,49 @@
           "longitude"
         ]
       },
+      "TripUpdatesResponse": {
+        "type": "object",
+        "description": "Trip updates and trip modifications for the requested service date. Feed freshness (`feedTimestamp`, `staleSeconds`) is global across the snapshot.",
+        "properties": {
+          "serviceDate": {
+            "type": "string",
+            "description": "GTFS service date as ISO-8601 `YYYY-MM-DD`, echoing the request."
+          },
+          "tripUpdates": {
+            "type": "array",
+            "description": "One entry per requested trip with a live update or a trip modification on this service date.",
+            "items": {
+              "$ref": "#/components/schemas/TripUpdate"
+            }
+          },
+          "missing": {
+            "type": "array",
+            "description": "Requested trip ids with neither a live update nor a trip modification on this service date, exactly as sent.",
+            "items": {
+              "type": "string"
+            }
+          },
+          "feedTimestamp": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Epoch seconds of the feed's latest report; absent when the feed has not reported."
+          },
+          "staleSeconds": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Seconds since `feedTimestamp`, as of when this body was produced; a cached or revalidated body keeps that value, and the age now is the current time minus `feedTimestamp`. Absent when `feedTimestamp` is."
+          }
+        },
+        "required": [
+          "serviceDate",
+          "tripUpdates",
+          "missing"
+        ]
+      },
       "DelaysResponse": {
         "type": "object",
-        "description": "Delays for the requested service date. Feed freshness (`feedTimestamp`, `staleSeconds`) is global across the snapshot.",
+        "description": "Deprecated with `GET /realtime/v1/delays`; its successor `GET /realtime/v1/trip-updates` answers `TripUpdatesResponse`: this body with `delays` named `tripUpdates`, each trip also carrying its trip modifications. Delays for the requested service date. Feed freshness (`feedTimestamp`, `staleSeconds`) is global across the snapshot.",
+        "deprecated": true,
         "properties": {
           "serviceDate": {
             "type": "string",
@@ -975,6 +1321,151 @@
           "tripId",
           "stopTimeUpdates"
         ]
+      },
+      "TripUpdate": {
+        "type": "object",
+        "description": "Live update for one trip run on the requested service date: its schedule deviation and the trip modifications (detours) that select it. A run with modifications and no GTFS-RT `TripUpdate` has empty `stopTimeUpdates` and no `delaySeconds`, `scheduleRelationship` or `routeId`. `tripId` and `routeId` are feed-prefixed (`<feedId>:<id>`).",
+        "properties": {
+          "tripId": {
+            "type": "string"
+          },
+          "startTime": {
+            "type": "string",
+            "description": "Start time of the trip run, as the feed's GTFS-RT `start_time` (or `modified_trip.start_time`) gives it: a GTFS time `HH:MM:SS` that may exceed `24:00:00`. It tells apart the runs of a frequency-based trip (`frequencies.txt`), each its own item; absent when the feed gives none."
+          },
+          "routeId": {
+            "type": "string"
+          },
+          "delaySeconds": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Seconds, positive when late: the delay of the last stop-time update that carries one, its departure delay before its arrival delay. Absent when the updates give only absolute times."
+          },
+          "scheduleRelationship": {
+            "type": "string",
+            "description": "GTFS-RT trip `ScheduleRelationship`.",
+            "enum": [
+              "SCHEDULED",
+              "ADDED",
+              "UNSCHEDULED",
+              "CANCELED",
+              "REPLACEMENT",
+              "DUPLICATED",
+              "DELETED",
+              "NEW"
+            ]
+          },
+          "stopTimeUpdates": {
+            "type": "array",
+            "description": "Empty when the update has none. For a modified trip, as the feed reports them against the modified stop times.",
+            "items": {
+              "$ref": "#/components/schemas/StopTimeUpdate"
+            }
+          },
+          "modifications": {
+            "type": "array",
+            "description": "Experimental, as GTFS-RT `TripModifications`. The modifications of every `TripModifications` entity whose `selected_trips` name this trip and whose `service_dates` hold the requested service date, and, when it has `start_times`, one of them is this run's `startTime`, in feed order; their delays accumulate along the trip. Absent when none applies.",
+            "items": {
+              "$ref": "#/components/schemas/TripModification"
+            }
+          }
+        },
+        "required": [
+          "tripId",
+          "stopTimeUpdates"
+        ]
+      },
+      "TripModification": {
+        "type": "object",
+        "description": "Experimental, as GTFS-RT `TripModifications.Modification`: a span of the trip's stop times replaced by `replacementStops`. A member the feed doesn't set is absent.",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Feed-prefixed (`<feedId>:<id>`) id of the `FeedEntity` holding the `TripModifications`: a modified trip's `TripDescriptor.modified_trip.modifications_id`."
+          },
+          "startTimes": {
+            "type": "array",
+            "description": "The entity's `start_times`, GTFS times `HH:MM:SS` of a frequency-based trip: the modification applies only to the runs whose `startTime` is one of them, and never to a run without a `startTime`. Absent when it applies to every run of the trip on the service date.",
+            "items": {
+              "type": "string"
+            }
+          },
+          "startStop": {
+            "$ref": "#/components/schemas/StopSelector",
+            "description": "The first original stop time replaced (`start_stop_selector`)."
+          },
+          "endStop": {
+            "$ref": "#/components/schemas/StopSelector",
+            "description": "The last original stop time replaced, inclusive (`end_stop_selector`); absent when no stop time is replaced."
+          },
+          "replacementStops": {
+            "type": "array",
+            "description": "The stops the trip now visits in place of the replaced span, in order; empty when the feed lists none.",
+            "items": {
+              "$ref": "#/components/schemas/ReplacementStop"
+            }
+          },
+          "propagatedModificationDelay": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Seconds added to every arrival and departure after the end of the modification; 0 when the feed doesn't set it."
+          },
+          "alertId": {
+            "type": "string",
+            "description": "Feed-prefixed (`<feedId>:<id>`) id of the `Alert` describing the modification (`service_alert_id`), as `GET /realtime/v1/alerts` returns it."
+          },
+          "lastModifiedTime": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Epoch seconds the modification last changed."
+          },
+          "shape": {
+            "type": "string",
+            "description": "The modified trip's path as an encoded polyline (Google's algorithm, 1e-5 precision), from the feed's `Shape` entity that the trip's `selected_trips.shape_id` names. Absent when the shape id names no `Shape` entity of the feed, e.g. a static `shapes.txt` shape."
+          }
+        },
+        "required": [
+          "id",
+          "replacementStops",
+          "propagatedModificationDelay"
+        ]
+      },
+      "StopSelector": {
+        "type": "object",
+        "description": "Experimental, as GTFS-RT `StopSelector`: an original stop time of the trip, by `stopSequence` and/or `stopId` as the feed gives it. `stopId` is feed-prefixed (`<feedId>:<id>`).",
+        "properties": {
+          "stopSequence": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "stopId": {
+            "type": "string"
+          }
+        }
+      },
+      "ReplacementStop": {
+        "type": "object",
+        "description": "Experimental, as GTFS-RT `ReplacementStop`. `stopId` is feed-prefixed (`<feedId>:<id>`). `name`, `latitude` and `longitude` are present only when the feed defines the stop as a realtime `Stop` entity; otherwise the stop is a static one, which the stop search returns.",
+        "properties": {
+          "stopId": {
+            "type": "string"
+          },
+          "travelTimeToStop": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Seconds from the arrival at the reference stop, the stop before `startStop` (the trip's first stop when the modification starts there), to the arrival here."
+          },
+          "name": {
+            "type": "string",
+            "description": "The realtime stop's first `stop_name` translation."
+          },
+          "latitude": {
+            "type": "number"
+          },
+          "longitude": {
+            "type": "number"
+          }
+        }
       },
       "StopTimeUpdate": {
         "type": "object",

@@ -904,3 +904,109 @@ test('planNext and planPrevious are null when the page has no neighbour that way
   assert.equal(await client.routing.planPrevious(first.data), null);
   assert.equal(mock.calls.length, 1);
 });
+
+test('departures sends excludeModes only when a real mode is excluded', async () => {
+  const mock = mockFetch({ json: { stop: { gtfsId: 'U1', name: 'Main', stoptimesWithoutPatterns: [] } } });
+  const client = new SpiderClient('https://x', 'k', { fetch: mock.fetch });
+
+  await client.routing.departures('U1', 5, { excludedModes: ['TRAM', 'WALK', 'UNKNOWN', 'BUS'] });
+  await client.routing.departures('U1', 5, { excludedModes: [] });
+  await client.routing.departures('U1', 5, { excludedModes: ['WALK', 'UNKNOWN'] });
+
+  assert.equal(mock.calls[0].body, '{"id":"U1","numberOfDepartures":5,"timeRange":86400,"excludeModes":["TRAM","BUS"]}');
+  assert.equal(mock.calls[1].body, '{"id":"U1","numberOfDepartures":5,"timeRange":86400}');
+  assert.equal(mock.calls[2].body, '{"id":"U1","numberOfDepartures":5,"timeRange":86400}');
+});
+
+test('plan sends excludedTransitModes as modes.transit.exclude, without WALK/UNKNOWN', async () => {
+  const mock = mockFetch({ json: PLAN_RESPONSE });
+  const client = new SpiderClient('https://x', 'k', { fetch: mock.fetch });
+  const ends = { origin: Location.stop('1:A'), destination: Location.stop('1:B'), departAt: new Date('2026-07-20T08:00:00Z') };
+
+  await client.routing.plan({ ...ends, excludedTransitModes: ['TRAM', 'WALK', 'UNKNOWN', 'RAIL'] });
+  await client.routing.plan({ ...ends, excludedTransitModes: [] });
+  await client.routing.plan({ ...ends, excludedTransitModes: ['WALK', 'UNKNOWN'] });
+  await client.routing.plan({ ...ends, allowedTransitModes: ['WALK'], excludedTransitModes: ['TRAM'] });
+
+  const prefix = '{"dateTime":{"earliestDeparture":"2026-07-20T08:00:00.000Z"},'
+    + '"origin":{"location":{"stopLocation":{"stopLocationId":"1:A"}}},'
+    + '"destination":{"location":{"stopLocation":{"stopLocationId":"1:B"}}},';
+  assert.equal(mock.calls[0].body, prefix + '"modes":{"transit":{"exclude":["TRAM","RAIL"]}},"searchWindow":"PT60M"}');
+  assert.equal(mock.calls[1].body, prefix + '"searchWindow":"PT60M"}');
+  assert.equal(mock.calls[2].body, prefix + '"searchWindow":"PT60M"}');
+  assert.equal(mock.calls[3].body, prefix + '"modes":{"transit":{"exclude":["TRAM"]}},"searchWindow":"PT60M"}');
+});
+
+test('planNext and planPrevious resend excludedTransitModes', async () => {
+  const mock = mockFetch({ json: PLAN_RESPONSE });
+  const client = new SpiderClient('https://x', 'k', { fetch: mock.fetch });
+
+  const first = await client.routing.plan({ origin: Location.stop('1:A'), destination: Location.stop('1:B'), excludedTransitModes: ['BUS'] });
+  if (!first.isSuccess) throw new Error(first.error.code);
+  await client.routing.planNext(first.data);
+  await client.routing.planPrevious(first.data);
+
+  assert.equal(mock.calls.length, 3);
+  for (const call of mock.calls) assert.deepEqual(bodyOf(call).modes, { transit: { exclude: ['BUS'] } });
+});
+
+test('plan with both allowed and excluded transit modes is bad_request on modes.transit without a request', async () => {
+  const mock = mockFetch({ json: PLAN_RESPONSE });
+  const client = new SpiderClient('https://x', 'k', { fetch: mock.fetch });
+
+  const result = await client.routing.plan({
+    origin: Location.stop('1:A'),
+    destination: Location.stop('1:B'),
+    allowedTransitModes: ['BUS'],
+    excludedTransitModes: ['TRAM'],
+  });
+
+  assert.equal(result.isSuccess, false);
+  if (!result.isSuccess) {
+    assert.equal(result.error.code, 'bad_request');
+    assert.equal(result.error.field, 'modes.transit');
+    assert.equal(result.error.message, 'modes.transit is invalid');
+  }
+  assert.equal(mock.calls.length, 0);
+});
+
+test('trip sends startTime only when set, and rejects a malformed one without a request', async () => {
+  const mock = mockFetch({ json: TRIP_WITHOUT_STOPS });
+  const client = new SpiderClient('https://x', 'k', { fetch: mock.fetch });
+
+  await client.routing.trip('t1', '2026-07-20', undefined, '8:10:00');
+  await client.routing.trip('t1', '2026-07-20', 'SAFE', '25:10:00');
+  await client.routing.trip('t1', '2026-07-20', undefined, '');
+
+  assert.equal(mock.calls[0].body, '{"id":"t1","serviceDate":"2026-07-20","startTime":"8:10:00"}');
+  assert.equal(mock.calls[1].body, '{"id":"t1","serviceDate":"2026-07-20","startTime":"25:10:00","reliability":"SAFE"}');
+  assert.equal(mock.calls[2].body, '{"id":"t1","serviceDate":"2026-07-20"}');
+
+  const result = await client.routing.trip('t1', '2026-07-20', undefined, '08:10');
+  assert.equal(result.isSuccess, false);
+  if (!result.isSuccess) {
+    assert.equal(result.error.code, 'bad_request');
+    assert.equal(result.error.field, 'startTime');
+    assert.equal(result.error.message, 'startTime is invalid');
+  }
+  assert.equal(mock.calls.length, 3);
+});
+
+test('estimatedDelays sends startTime only when set, and rejects a malformed one without a request', async () => {
+  const mock = mockFetch({ json: { estimatedDelays: null } });
+  const client = new SpiderClient('https://x', 'k', { fetch: mock.fetch });
+
+  await client.routing.estimatedDelays('1:t1', '2026-07-20', 4, '08:10:00');
+  await client.routing.estimatedDelays('1:t1', '2026-07-20', 4, '');
+
+  assert.equal(mock.calls[0].url, 'https://x/routing/v1/estimated-delays?tripId=1%3At1&serviceDate=2026-07-20&stopPosition=4&startTime=08%3A10%3A00');
+  assert.equal(mock.calls[1].url, 'https://x/routing/v1/estimated-delays?tripId=1%3At1&serviceDate=2026-07-20&stopPosition=4');
+
+  const result = await client.routing.estimatedDelays('1:t1', '2026-07-20', 4, '8:1:00');
+  assert.equal(result.isSuccess, false);
+  if (!result.isSuccess) {
+    assert.equal(result.error.code, 'bad_request');
+    assert.equal(result.error.field, 'startTime');
+  }
+  assert.equal(mock.calls.length, 2);
+});

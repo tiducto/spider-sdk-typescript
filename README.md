@@ -44,7 +44,7 @@ Every call returns a `SpiderResult<T>` you branch on before reading `data`. The 
 
 - **`client.routing`** — trip planning (with paging), departures, and single-trip lookups.
 - **`client.stops`** — text/autocomplete search, geo queries (nearest / bounding box), and lookup by GTFS id.
-- **`client.realtime`** — poll-based live vehicle positions, delays, and alerts (no push connections).
+- **`client.realtime`** — poll-based live vehicle positions, trip updates (delays and detours), and alerts (no push connections).
 
 **Full API reference and guides → [docs.tiducto.eu](https://docs.tiducto.eu).** Product overview → [tiducto.eu](https://tiducto.eu).
 
