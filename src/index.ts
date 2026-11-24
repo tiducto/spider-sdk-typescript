@@ -37,7 +37,7 @@ export { SpiderStops } from './stops.ts';
 export type { Stop, StopFilter, GeoPoint, GeoBoundingBox } from './stops.ts';
 export { SpiderPlaces } from './places.ts';
 export type { PlaceHit, PlaceSearchOptions } from './places.ts';
-export { SpiderRealtime, delayFor } from './realtime.ts';
+export { SpiderRealtime, delayFor, tripUpdateFor } from './realtime.ts';
 export type {
   FeedFreshness,
   LiveVehicle,
@@ -46,10 +46,15 @@ export type {
   StopTimeUpdate,
   TripDelay,
   TripDelays,
+  TripUpdate,
+  TripUpdates,
+  TripModification,
+  ReplacementStop,
+  StopSelector,
   ServiceAlert,
   AlertActivePeriod,
   AlertInformedEntity,
   ServiceAlerts,
 } from './realtime.ts';
-export { pollVehicles, pollVehicleForTrip, pollDelays, pollAlerts } from './polling.ts';
-export type { PollOptions } from './polling.ts';
+export { pollVehicles, pollVehicleForTrip, pollTripUpdates, pollDelays, pollAlerts } from './polling.ts';
+export type { PollOptions, VehicleForTripPollOptions } from './polling.ts';

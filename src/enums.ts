@@ -142,6 +142,11 @@ export function wheelchairFromWire(raw: string | null | undefined): WheelchairBo
   return raw == null || raw === 'NO_INFORMATION' ? null : decode(WHEELCHAIR_BOARDING, raw);
 }
 
+export function vehicleWheelchairFromWire(raw: string | null | undefined): WheelchairBoarding | null {
+  if (raw == null || raw === 'UNKNOWN') return null;
+  return raw === 'WHEELCHAIR_ACCESSIBLE' ? 'POSSIBLE' : raw === 'WHEELCHAIR_INACCESSIBLE' ? 'NOT_POSSIBLE' : 'UNKNOWN';
+}
+
 /** GTFS `wheelchair_boarding` as the stop-search index carries it: 1 possible, 2 not possible, 0 no information. */
 export function wheelchairFromGtfs(raw: number | null | undefined): WheelchairBoarding | null {
   if (raw == null || raw === 0) return null;

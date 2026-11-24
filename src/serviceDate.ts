@@ -11,3 +11,17 @@ export function invalidServiceDate(serviceDate: string): SpiderError | null {
   }
   return badRequest('serviceDate', 'is invalid');
 }
+
+const GTFS_TIME = /^\d{1,2}:[0-5]\d:[0-5]\d$/;
+
+export function invalidStartTime(startTime: string | undefined): SpiderError | null {
+  return startTime == null || startTime === '' || GTFS_TIME.test(startTime) ? null : badRequest('startTime', 'is invalid');
+}
+
+export function startTimeOrUndefined(startTime: string | undefined): string | undefined {
+  return startTime == null || startTime === '' ? undefined : startTime;
+}
+
+export function sameGtfsTime(a: string, b: string): boolean {
+  return a.padStart(8, '0') === b.padStart(8, '0');
+}

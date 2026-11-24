@@ -1,6 +1,6 @@
 import type { LatLon } from './routing.ts';
 
-export function decodePolyline(encoded: string): LatLon[] {
+export function decodePolyline(encoded: string, factor = 1e6): LatLon[] {
   if (encoded.length === 0) return [];
   const points: LatLon[] = [];
   let index = 0;
@@ -30,7 +30,7 @@ export function decodePolyline(encoded: string): LatLon[] {
     const dLon = (result & 1) !== 0 ? ~(result >> 1) : result >> 1;
     lon += dLon;
 
-    points.push({ lat: lat / 1e6, lon: lon / 1e6 });
+    points.push({ lat: lat / factor, lon: lon / factor });
   }
   return points;
 }

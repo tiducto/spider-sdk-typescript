@@ -2,7 +2,7 @@ import { SpiderClient, pollVehicles } from '@tiducto/spider-sdk-typescript'
 
 export function poll(client: SpiderClient, serviceDate: string, tripIds: string[], updateBoard: (data: unknown) => void) {
   setInterval(async () => {
-    const result = await client.realtime.delays(serviceDate, tripIds)
+    const result = await client.realtime.tripUpdates(serviceDate, tripIds)
     if (result.isSuccess) {
       updateBoard(result.data)
     } else {
@@ -47,12 +47,12 @@ export async function vehicleForTrip(client: SpiderClient, tripId: string, servi
 }
 
 export async function delays(client: SpiderClient, serviceDate: string, tripIds: string[]) {
-  const result = await client.realtime.delays(serviceDate, tripIds)
+  const result = await client.realtime.tripUpdates(serviceDate, tripIds)
   if (result.isSuccess) {
-    for (const delay of result.data.delays) {
-      if (delay.delaySeconds === null) continue
-      const minutes = Math.trunc(delay.delaySeconds / 60)
-      console.log(`${delay.tripId}: ${minutes >= 0 ? '+' : ''}${minutes} min`)
+    for (const update of result.data.tripUpdates) {
+      if (update.delaySeconds === null) continue
+      const minutes = Math.trunc(update.delaySeconds / 60)
+      console.log(`${update.tripId}: ${minutes >= 0 ? '+' : ''}${minutes} min`)
     }
   } else {
     console.error('Failed to load delays:', result.error)
