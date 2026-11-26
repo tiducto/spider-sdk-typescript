@@ -376,17 +376,17 @@ export interface PlanOptions {
  * never clamps one. The API rounds the multipliers and the walking speed to its own steps.
  */
 export interface RoutePreferences {
-  /** Walking speed on flat ground in metres per second, at least 0.1. */
+  /** Walking speed on flat ground in metres per second, from 0.3 to 5. */
   readonly walkSpeed?: number;
-  /** How much worse walking is than riding for the same time, a multiplier from 0.1 to 100000: above the default it walks less. */
+  /** How much worse walking is than riding for the same time, a multiplier from 1 to 100: above the default it walks less. */
   readonly walkReluctance?: number;
-  /** Generalized cost added for each boarding, an integer from 0 to 1000000: higher favours fewer rides. */
+  /** Generalized cost added for each boarding, an integer from 0 to 86400: higher favours fewer rides. */
   readonly boardCost?: number;
-  /** Generalized cost added for each transfer, an integer from 0 to 1000000: higher favours fewer transfers. */
+  /** Generalized cost added for each transfer, an integer from 0 to 86400: higher favours fewer transfers. */
   readonly transferCost?: number;
   /** Least time in seconds between alighting one vehicle and boarding the next, on top of the walk between the stops: 0 to 3600. */
   readonly transferSlackSeconds?: number;
-  /** How much worse waiting at a stop is than riding for the same time, from 0.1 to 100000: above the default it rather walks on than waits. */
+  /** How much worse waiting at a stop is than riding for the same time, from 1 to 100: above the default it rather walks on than waits. */
   readonly waitReluctance?: number;
   /** Least time in seconds at the stop before boarding: 0 to 3600. */
   readonly boardSlackSeconds?: number;
@@ -402,7 +402,7 @@ export interface RoutePreferences {
   readonly excludedAgencies?: readonly string[];
   /**
    * How much worse riding a transit mode is than riding for the same time on another, per mode: a multiplier from
-   * 0.1 to 100000, above 1 avoiding the mode, below 1 favouring it. A mode not listed keeps 1. It restricts no mode,
+   * 1 to 100, 1 riding the mode as any other, above 1 avoiding it. A mode not listed keeps 1. It restricts no mode,
    * and a mode `excludedTransitModes` names stays excluded. With `allowedTransitModes`, each allowed mode carries its
    * own reluctance and one for a mode not allowed is dropped. WALK/UNKNOWN and the other non-transit modes drop out.
    * Undefined/empty changes no cost.
@@ -475,9 +475,11 @@ const MAX_VIA_STOP_IDS = 10;
 const MAX_VIA_WAIT_SECONDS = 60 * 60;
 const WALK_PREFERENCES = 'preferences.street.walk';
 const TRANSIT_PREFERENCES = 'preferences.transit';
-const MIN_MULTIPLIER = 0.1;
-const MAX_MULTIPLIER = 100_000;
-const MAX_COST = 1_000_000;
+const MIN_MULTIPLIER = 1;
+const MAX_MULTIPLIER = 100;
+const MIN_WALK_SPEED = 0.3;
+const MAX_WALK_SPEED = 5;
+const MAX_COST = 86_400;
 const MAX_SLACK_SECONDS = 60 * 60;
 const MODE_RELUCTANCE_COSTS = 'modes.transit.costs.reluctance';
 const MODE_RELUCTANCE_ALLOWED = 'modes.transit.transit.cost.reluctance';
@@ -879,7 +881,7 @@ function invalidPreferences(preferences: RoutePreferences | undefined, allowed: 
     if (reluctance != null && !isMultiplier(reluctance)) return badRequest(reluctanceField);
   }
   const checks: [number | undefined, string, (value: number) => boolean][] = [
-    [preferences.walkSpeed, `${WALK_PREFERENCES}.speed`, (v) => Number.isFinite(v) && v >= MIN_MULTIPLIER],
+    [preferences.walkSpeed, `${WALK_PREFERENCES}.speed`, (v) => Number.isFinite(v) && v >= MIN_WALK_SPEED && v <= MAX_WALK_SPEED],
     [preferences.walkReluctance, `${WALK_PREFERENCES}.reluctance`, isMultiplier],
     [preferences.boardCost, `${WALK_PREFERENCES}.boardCost`, isCost],
     [preferences.transferCost, `${TRANSIT_PREFERENCES}.transfer.cost`, isCost],

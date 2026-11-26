@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased
+
+Targets Spider API contract 1.13.
+
+### Changed (breaking)
+
+- **`RoutePreferences` ranges narrowed to contract 1.13**, as the API already rejects values outside them:
+  `walkReluctance`, `waitReluctance` and each `modeReluctance` are multipliers from 1 to 100 (were 0.1 to 100000), so
+  a mode reluctance of 1 rides the mode as any other and above 1 avoids it; `walkSpeed` is 0.3 to 5 metres per second
+  (was at least 0.1, with no maximum); `boardCost` and `transferCost` are integers from 0 to 86400 (were 0 to
+  1000000). A value outside its range fails as `bad_request` on its contract path without a request, as before.
+
 ## 1.12.0
 
 Targets Spider API contract 1.12.

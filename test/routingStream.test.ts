@@ -559,20 +559,20 @@ test('planStream and its continuations send modeReluctance as costs, or on the a
   const options: PlanStreamRequestOptions = {
     ...STREAM_OPTIONS,
     excludedTransitModes: ['RAIL'],
-    preferences: { modeReluctance: { TRAM: 0.5, BUS: 2 } },
+    preferences: { modeReluctance: { TRAM: 1.5, BUS: 2 } },
   };
 
   await collect(client.routing.planStream(options));
   await collect(client.routing.planStreamNext(options, 'c-end'));
   await collect(client.routing.planStreamPrevious(options, 'c-start'));
-  await collect(client.routing.planStream({ ...STREAM_OPTIONS, allowedTransitModes: ['TRAM'], preferences: { modeReluctance: { TRAM: 0.5, BUS: 2 } } }));
+  await collect(client.routing.planStream({ ...STREAM_OPTIONS, allowedTransitModes: ['TRAM'], preferences: { modeReluctance: { TRAM: 1.5, BUS: 2 } } }));
   await collect(client.routing.planStream({ ...STREAM_OPTIONS, preferences: { modeReluctance: {} } }));
 
-  const modes = { transit: { exclude: ['RAIL'], costs: [{ mode: 'BUS', reluctance: 2 }, { mode: 'TRAM', reluctance: 0.5 }] } };
+  const modes = { transit: { exclude: ['RAIL'], costs: [{ mode: 'BUS', reluctance: 2 }, { mode: 'TRAM', reluctance: 1.5 }] } };
   const bodies = mock.calls.map((c) => JSON.parse(c.body));
-  assert.deepEqual(bodies.map((b) => b.modes), [modes, modes, modes, { transit: { transit: [{ mode: 'TRAM', cost: { reluctance: 0.5 } }] } }, undefined]);
+  assert.deepEqual(bodies.map((b) => b.modes), [modes, modes, modes, { transit: { transit: [{ mode: 'TRAM', cost: { reluctance: 1.5 } }] } }, undefined]);
 
-  const events = await collect(client.routing.planStreamNext({ ...options, preferences: { modeReluctance: { BUS: 200_000 } } }, 'c'));
+  const events = await collect(client.routing.planStreamNext({ ...options, preferences: { modeReluctance: { BUS: 101 } } }, 'c'));
   assert.equal(events.length, 1);
   const ev = events[0];
   assert.equal(ev.type === 'failure' && ev.error.field, 'modes.transit.costs.reluctance');

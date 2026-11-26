@@ -45,15 +45,19 @@ const PLAN_RESPONSE = {
 };
 
 const OUT_OF_RANGE_PREFERENCES: readonly [RoutePreferences, string][] = [
-  [{ walkSpeed: 0.09 }, 'preferences.street.walk.speed'],
+  [{ walkSpeed: 0.29 }, 'preferences.street.walk.speed'],
+  [{ walkSpeed: 5.01 }, 'preferences.street.walk.speed'],
   [{ walkSpeed: Number.POSITIVE_INFINITY }, 'preferences.street.walk.speed'],
   [{ walkSpeed: Number.NaN }, 'preferences.street.walk.speed'],
-  [{ walkReluctance: 100_001 }, 'preferences.street.walk.reluctance'],
+  [{ walkReluctance: 0.99 }, 'preferences.street.walk.reluctance'],
+  [{ walkReluctance: 100.01 }, 'preferences.street.walk.reluctance'],
   [{ boardCost: -1 }, 'preferences.street.walk.boardCost'],
   [{ boardCost: 1.5 }, 'preferences.street.walk.boardCost'],
-  [{ transferCost: 1_000_001 }, 'preferences.transit.transfer.cost'],
+  [{ boardCost: 86_401 }, 'preferences.street.walk.boardCost'],
+  [{ transferCost: 86_401 }, 'preferences.transit.transfer.cost'],
   [{ transferSlackSeconds: -1 }, 'preferences.transit.transfer.slack'],
-  [{ waitReluctance: 0 }, 'preferences.transit.board.waitReluctance'],
+  [{ waitReluctance: 0.99 }, 'preferences.transit.board.waitReluctance'],
+  [{ waitReluctance: 101 }, 'preferences.transit.board.waitReluctance'],
   [{ boardSlackSeconds: 61 * 60 }, 'preferences.transit.board.slack'],
   [{ alightSlackSeconds: 3601 }, 'preferences.transit.alight.slack'],
 ];
@@ -1118,7 +1122,7 @@ test('plan sends every preference at its contract path beside maximumTransfers a
       boardCost: 600,
       transferCost: 300,
       transferSlackSeconds: 120,
-      waitReluctance: 0.5,
+      waitReluctance: 1.5,
       boardSlackSeconds: 30,
       alightSlackSeconds: 3600,
       excludedRoutes: ['1:L4', '1:L9'],
@@ -1130,7 +1134,7 @@ test('plan sends every preference at its contract path beside maximumTransfers a
     JSON.stringify(bodyOf(mock.calls[0]).preferences),
     '{"street":{"walk":{"speed":1.2,"reluctance":4.5,"boardCost":600}},'
       + '"transit":{"transfer":{"cost":300,"slack":"PT120S","maximumTransfers":3},'
-      + '"board":{"waitReluctance":0.5,"slack":"PT30S"},"alight":{"slack":"PT3600S"},'
+      + '"board":{"waitReluctance":1.5,"slack":"PT30S"},"alight":{"slack":"PT3600S"},'
       + '"filters":[{"exclude":[{"routes":["1:L4","1:L9"]},{"agencies":["1:DPMB"]}]}]},'
       + '"accessibility":{"wheelchair":{"enabled":true}}}',
   );
@@ -1142,13 +1146,13 @@ test('plan sends a single preference as only its own branch', async () => {
   const ends = { origin: Location.stop('1:A'), destination: Location.stop('1:B') };
 
   await client.routing.plan({ ...ends, preferences: { transferSlackSeconds: 0 } });
-  await client.routing.plan({ ...ends, preferences: { walkSpeed: 0.1 } });
+  await client.routing.plan({ ...ends, preferences: { walkSpeed: 0.3 } });
   await client.routing.plan({ ...ends, preferences: { excludedRoutes: [], excludedAgencies: ['1:A'] } });
   await client.routing.plan({ ...ends, preferences: { boardSlackSeconds: 90 } });
 
   assert.deepEqual(mock.calls.map((c) => bodyOf(c).preferences), [
     { transit: { transfer: { slack: 'PT0S' } } },
-    { street: { walk: { speed: 0.1 } } },
+    { street: { walk: { speed: 0.3 } } },
     { transit: { filters: [{ exclude: [{ agencies: ['1:A'] }] }] } },
     { transit: { board: { slack: 'PT90S' } } },
   ]);
@@ -1173,17 +1177,24 @@ test('plan rejects a preference out of its contract range as bad_request on its 
     origin: Location.stop('1:A'),
     destination: Location.stop('1:B'),
     preferences: {
-      walkSpeed: 0.1,
-      walkReluctance: 100_000,
+      walkSpeed: 0.3,
+      walkReluctance: 100,
       boardCost: 0,
-      transferCost: 1_000_000,
+      transferCost: 86_400,
       transferSlackSeconds: 3600,
-      waitReluctance: 0.1,
+      waitReluctance: 1,
       boardSlackSeconds: 0,
       alightSlackSeconds: 3600,
     },
   });
   assert.equal(inRange.isSuccess, true);
+
+  const otherEnds = await client.routing.plan({
+    origin: Location.stop('1:A'),
+    destination: Location.stop('1:B'),
+    preferences: { walkSpeed: 5, walkReluctance: 1, boardCost: 86_400, transferCost: 0, waitReluctance: 100 },
+  });
+  assert.equal(otherEnds.isSuccess, true);
 });
 
 test('plan sends transitOnly as modes.transitOnly beside the mode filters, and nothing when false', async () => {
@@ -1262,17 +1273,17 @@ test('plan sends modeReluctance as modes.transit.costs in TransitMode order, bes
   await client.routing.plan({
     ...ends,
     excludedTransitModes: ['RAIL'],
-    preferences: { modeReluctance: { TRAM: 0.5, BUS: 2, RAIL: 3 } },
+    preferences: { modeReluctance: { TRAM: 1.5, BUS: 2, RAIL: 3 } },
   });
-  await client.routing.plan({ ...ends, preferences: { modeReluctance: { TROLLEYBUS: 100_000, AIRPLANE: 0.1, WALK: 4, UNKNOWN: 5 } } });
+  await client.routing.plan({ ...ends, preferences: { modeReluctance: { TROLLEYBUS: 100, AIRPLANE: 1, WALK: 4, UNKNOWN: 5 } } });
 
   assert.equal(
     JSON.stringify(bodyOf(mock.calls[0]).modes),
-    '{"transit":{"exclude":["RAIL"],"costs":[{"mode":"BUS","reluctance":2},{"mode":"RAIL","reluctance":3},{"mode":"TRAM","reluctance":0.5}]}}',
+    '{"transit":{"exclude":["RAIL"],"costs":[{"mode":"BUS","reluctance":2},{"mode":"RAIL","reluctance":3},{"mode":"TRAM","reluctance":1.5}]}}',
   );
   assert.equal(
     JSON.stringify(bodyOf(mock.calls[1]).modes),
-    '{"transit":{"costs":[{"mode":"AIRPLANE","reluctance":0.1},{"mode":"TROLLEYBUS","reluctance":100000}]}}',
+    '{"transit":{"costs":[{"mode":"AIRPLANE","reluctance":1},{"mode":"TROLLEYBUS","reluctance":100}]}}',
   );
 });
 
@@ -1315,8 +1326,8 @@ test('plan rejects a mode reluctance out of range on its modes path without a re
   const client = new SpiderClient('https://x', 'k', { fetch: mock.fetch });
   const ends = { origin: Location.stop('1:A'), destination: Location.stop('1:B') };
   const cases: [Parameters<typeof client.routing.plan>[0], string][] = [
-    [{ ...ends, preferences: { modeReluctance: { BUS: 0.09 } } }, 'modes.transit.costs.reluctance'],
-    [{ ...ends, preferences: { modeReluctance: { BUS: 100_001 } } }, 'modes.transit.costs.reluctance'],
+    [{ ...ends, preferences: { modeReluctance: { BUS: 0.99 } } }, 'modes.transit.costs.reluctance'],
+    [{ ...ends, preferences: { modeReluctance: { BUS: 100.01 } } }, 'modes.transit.costs.reluctance'],
     [{ ...ends, preferences: { modeReluctance: { TRAM: Number.NaN } } }, 'modes.transit.costs.reluctance'],
     [{ ...ends, preferences: { modeReluctance: { TRAM: Number.POSITIVE_INFINITY } } }, 'modes.transit.costs.reluctance'],
     [{ ...ends, allowedTransitModes: ['BUS'], preferences: { modeReluctance: { BUS: 0 } } }, 'modes.transit.transit.cost.reluctance'],
@@ -1342,13 +1353,13 @@ test('planNext and planPrevious resend modeReluctance', async () => {
     origin: Location.stop('1:A'),
     destination: Location.stop('1:B'),
     excludedTransitModes: ['RAIL'],
-    preferences: { modeReluctance: { TRAM: 0.5 } },
+    preferences: { modeReluctance: { TRAM: 1.5 } },
   });
   if (!first.isSuccess) throw new Error(first.error.code);
   await client.routing.planNext(first.data);
   await client.routing.planPrevious(first.data);
 
-  const modes = { transit: { exclude: ['RAIL'], costs: [{ mode: 'TRAM', reluctance: 0.5 }] } };
+  const modes = { transit: { exclude: ['RAIL'], costs: [{ mode: 'TRAM', reluctance: 1.5 }] } };
   assert.deepEqual(mock.calls.map((c) => bodyOf(c).modes), [modes, modes, modes]);
 });
 
