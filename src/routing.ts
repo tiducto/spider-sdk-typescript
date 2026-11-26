@@ -34,6 +34,8 @@ import type {
   PlanTripResponse,
   PlanViaLocationInput,
   RoutingError as RoutingErrorWire,
+  TransitFilterInput,
+  TransitFilterSelectInput,
   TransitMode as WireTransitMode,
   TripRequest,
   TripResponse,
@@ -321,6 +323,49 @@ export interface PlanOptions {
    * `bad_request` on `modes.transit` before any request.
    */
   readonly excludedTransitModes?: readonly TransitMode[];
+  /** Tunes walking, transfers and boarding, and leaves out routes or agencies. Undefined = the environment's defaults. */
+  readonly preferences?: RoutePreferences;
+  /** Leave out every itinerary without a transit leg, such as walking the whole way. Default false. */
+  readonly transitOnly?: boolean;
+  /**
+   * The most itineraries the page holds, from 1 up to the environment's itinerary limit; the API rejects a value out
+   * of range, never clamps it. Undefined = that limit. {@link SpiderRouting.planNext} and
+   * {@link SpiderRouting.planPrevious} keep it unless they are given another.
+   */
+  readonly numberOfItineraries?: number;
+}
+
+/**
+ * Optional routing preferences for {@link SpiderRouting.plan} and {@link SpiderRouting.planStream}. Each member left
+ * undefined keeps the environment's default, so `{}` asks for nothing. A value outside its range fails as
+ * `bad_request` on the member's contract path (such as `preferences.street.walk.speed`) before any request; the API
+ * never clamps one. The API rounds the multipliers and the walking speed to its own steps.
+ */
+export interface RoutePreferences {
+  /** Walking speed on flat ground in metres per second, at least 0.1. */
+  readonly walkSpeed?: number;
+  /** How much worse walking is than riding for the same time, a multiplier from 0.1 to 100000: above the default it walks less. */
+  readonly walkReluctance?: number;
+  /** Generalized cost added for each boarding, an integer from 0 to 1000000: higher favours fewer rides. */
+  readonly boardCost?: number;
+  /** Generalized cost added for each transfer, an integer from 0 to 1000000: higher favours fewer transfers. */
+  readonly transferCost?: number;
+  /** Least time in seconds between alighting one vehicle and boarding the next, on top of the walk between the stops: 0 to 3600. */
+  readonly transferSlackSeconds?: number;
+  /** How much worse waiting at a stop is than riding for the same time, from 0.1 to 100000: above the default it rather walks on than waits. */
+  readonly waitReluctance?: number;
+  /** Least time in seconds at the stop before boarding: 0 to 3600. */
+  readonly boardSlackSeconds?: number;
+  /** Least time in seconds needed to alight: 0 to 3600. */
+  readonly alightSlackSeconds?: number;
+  /**
+   * Leave out every trip of these feed-prefixed route ids (`<feedId>:<id>`, as {@link Leg.routeGtfsId} and
+   * {@link Departure.routeGtfsId} give them). An id the environment's feed doesn't know excludes nothing, and
+   * undefined/empty excludes nothing.
+   */
+  readonly excludedRoutes?: readonly string[];
+  /** Leave out every trip of these feed-prefixed agency ids (`<feedId>:<id>`), as for `excludedRoutes`. */
+  readonly excludedAgencies?: readonly string[];
 }
 
 /**
@@ -351,6 +396,10 @@ export interface PlanStreamRequestOptions {
   readonly maxWindowMinutes: number;
   /** As {@link PlanOptions.excludedTransitModes}. */
   readonly excludedTransitModes?: readonly TransitMode[];
+  /** As {@link PlanOptions.preferences}. A continuation must repeat it: its cursor carries only the time and the window. */
+  readonly preferences?: RoutePreferences;
+  /** As {@link PlanOptions.transitOnly}. A continuation must repeat it. */
+  readonly transitOnly?: boolean;
 }
 
 export interface DeparturesOptions {
@@ -382,6 +431,12 @@ const MAX_TIME_RANGE_SECONDS = 24 * 60 * 60;
 const MIN_STREAM_WINDOW_MINUTES = 120;
 const MAX_VIA_STOP_IDS = 10;
 const MAX_VIA_WAIT_SECONDS = 60 * 60;
+const WALK_PREFERENCES = 'preferences.street.walk';
+const TRANSIT_PREFERENCES = 'preferences.transit';
+const MIN_MULTIPLIER = 0.1;
+const MAX_MULTIPLIER = 100_000;
+const MAX_COST = 1_000_000;
+const MAX_SLACK_SECONDS = 60 * 60;
 
 // The OTP transit modes valid in a modes filter — the public TransitMode union also carries street/leg
 // values (WALK, BICYCLE, CAR, TRANSIT, UNKNOWN) that are not transit modes and must not reach the wire.
@@ -406,6 +461,9 @@ interface PlanRequest {
   readonly wheelchairAccessible: boolean;
   readonly reliability?: Reliability;
   readonly excludedTransitModes: readonly TransitMode[];
+  readonly preferences?: RoutePreferences;
+  readonly transitOnly: boolean;
+  readonly numberOfItineraries?: number;
 }
 
 const ROUTE_REQUEST = Symbol('spider.routeRequest');
@@ -418,6 +476,10 @@ export class SpiderRouting {
     this.transport = transport;
   }
 
+  /**
+   * One page of itineraries. `preferences`, `transitOnly` and `numberOfItineraries` are kept with the route, so
+   * {@link planNext} and {@link planPrevious} resend them with the mode filters.
+   */
   async plan(options: PlanOptions): Promise<SpiderResult<Route>> {
     const time: RouteTimeSpec = options.arriveBy != null
       ? { kind: 'arriveBy', epochMs: toEpochMs(options.arriveBy) }
@@ -433,8 +495,13 @@ export class SpiderRouting {
       wheelchairAccessible: options.wheelchairAccessible ?? false,
       reliability: options.reliability,
       excludedTransitModes: options.excludedTransitModes ?? [],
+      preferences: options.preferences,
+      transitOnly: options.transitOnly ?? false,
+      numberOfItineraries: options.numberOfItineraries,
     };
-    const invalid = invalidModes(request.allowedTransitModes, request.excludedTransitModes) ?? invalidVia(request.via);
+    const invalid = invalidModes(request.allowedTransitModes, request.excludedTransitModes)
+      ?? invalidVia(request.via)
+      ?? invalidPreferences(request.preferences);
     if (invalid != null) return failure(invalid);
     return this.page(request);
   }
@@ -484,10 +551,11 @@ export class SpiderRouting {
       origin: locationToInput(options.origin),
       destination: locationToInput(options.destination),
       via: via.length > 0 ? via.map(viaToInput) : undefined,
-      modes: modesInput(options.allowedTransitModes ?? [], options.excludedTransitModes ?? []),
+      modes: modesInput(options.allowedTransitModes ?? [], options.excludedTransitModes ?? [], options.transitOnly ?? false),
       preferences: preferencesInput({
         maxTransfers: options.maxTransfers,
         wheelchairAccessible: options.wheelchairAccessible ?? false,
+        preferences: options.preferences,
       }),
       targetResults: options.targetResults,
       maxWindow: `PT${Math.floor(options.maxWindowMinutes)}M`,
@@ -548,16 +616,23 @@ export class SpiderRouting {
     }
   }
 
-  async planNext(route: Route): Promise<SpiderResult<Route> | null> {
+  /**
+   * Plans the next window of itineraries (later departures); null when the page has no next one.
+   * `numberOfItineraries` sizes this page as in {@link plan}: undefined keeps the size `route` was asked with, null
+   * asks for the environment's limit, and the pages after this one keep what this one used.
+   */
+  async planNext(route: Route, numberOfItineraries?: number | null): Promise<SpiderResult<Route> | null> {
     if (!route.pageInfo.hasNextPage) return null;
-    // Forward paging = after (no count; the server returns a whole window per page).
-    return this.page(requestOf(route), cursorOf('after', route.pageInfo.endCursor));
+    return this.page(resized(requestOf(route), numberOfItineraries), cursorOf('after', route.pageInfo.endCursor));
   }
 
-  async planPrevious(route: Route): Promise<SpiderResult<Route> | null> {
+  /**
+   * Plans the previous window of itineraries (earlier departures); null when the page has no previous one.
+   * `numberOfItineraries` sizes this page as in {@link planNext}.
+   */
+  async planPrevious(route: Route, numberOfItineraries?: number | null): Promise<SpiderResult<Route> | null> {
     if (!route.pageInfo.hasPreviousPage) return null;
-    // Backward paging = before (no count; the server returns a whole window per page).
-    return this.page(requestOf(route), cursorOf('before', route.pageInfo.startCursor));
+    return this.page(resized(requestOf(route), numberOfItineraries), cursorOf('before', route.pageInfo.startCursor));
   }
 
   /**
@@ -659,9 +734,11 @@ export class SpiderRouting {
       origin: locationToInput(request.origin),
       destination: locationToInput(request.destination),
       via: request.via.length > 0 ? request.via.map(viaToInput) : undefined,
-      modes: modesInput(request.allowedTransitModes, request.excludedTransitModes),
+      modes: modesInput(request.allowedTransitModes, request.excludedTransitModes, request.transitOnly),
       preferences: preferencesInput(request),
       searchWindow: `PT${Math.floor(request.searchWindowMinutes)}M`,
+      first: cursor != null && 'before' in cursor ? undefined : request.numberOfItineraries,
+      last: cursor != null && 'before' in cursor ? request.numberOfItineraries : undefined,
       reliability: request.reliability,
       ...cursor,
     };
@@ -686,6 +763,10 @@ function requestOf(route: Route): PlanRequest {
   return (route as RouteWithRequest)[ROUTE_REQUEST];
 }
 
+function resized(request: PlanRequest, numberOfItineraries: number | null | undefined): PlanRequest {
+  return numberOfItineraries === undefined ? request : { ...request, numberOfItineraries: numberOfItineraries ?? undefined };
+}
+
 function toEpochMs(value: number | Date): number {
   return typeof value === 'number' ? value : value.getTime();
 }
@@ -701,7 +782,9 @@ function invalidStreamOptions(options: PlanStreamRequestOptions): SpiderError | 
   // Required by the type; a plain-JS caller can still omit it, and `PTNaNM` must never reach the wire.
   if (options.maxWindowMinutes == null) return badRequest('maxWindow', 'is required');
   if (!(Math.floor(options.maxWindowMinutes) >= MIN_STREAM_WINDOW_MINUTES)) return badRequest('maxWindow');
-  return invalidModes(options.allowedTransitModes ?? [], options.excludedTransitModes ?? []) ?? invalidVia(options.via ?? []);
+  return invalidModes(options.allowedTransitModes ?? [], options.excludedTransitModes ?? [])
+    ?? invalidVia(options.via ?? [])
+    ?? invalidPreferences(options.preferences);
 }
 
 // The API takes an allow-list or an exclude-list, never both non-empty: the same field and wording as its own 400.
@@ -718,6 +801,36 @@ function invalidVia(via: readonly ViaLocation[]): SpiderError | null {
     }
   }
   return null;
+}
+
+function invalidPreferences(preferences: RoutePreferences | undefined): SpiderError | null {
+  if (preferences == null) return null;
+  const checks: [number | undefined, string, (value: number) => boolean][] = [
+    [preferences.walkSpeed, `${WALK_PREFERENCES}.speed`, (v) => Number.isFinite(v) && v >= MIN_MULTIPLIER],
+    [preferences.walkReluctance, `${WALK_PREFERENCES}.reluctance`, isMultiplier],
+    [preferences.boardCost, `${WALK_PREFERENCES}.boardCost`, isCost],
+    [preferences.transferCost, `${TRANSIT_PREFERENCES}.transfer.cost`, isCost],
+    [preferences.transferSlackSeconds, `${TRANSIT_PREFERENCES}.transfer.slack`, isSlack],
+    [preferences.waitReluctance, `${TRANSIT_PREFERENCES}.board.waitReluctance`, isMultiplier],
+    [preferences.boardSlackSeconds, `${TRANSIT_PREFERENCES}.board.slack`, isSlack],
+    [preferences.alightSlackSeconds, `${TRANSIT_PREFERENCES}.alight.slack`, isSlack],
+  ];
+  for (const [value, field, valid] of checks) {
+    if (value != null && !valid(value)) return badRequest(field);
+  }
+  return null;
+}
+
+function isMultiplier(value: number): boolean {
+  return value >= MIN_MULTIPLIER && value <= MAX_MULTIPLIER;
+}
+
+function isCost(value: number): boolean {
+  return Number.isInteger(value) && value >= 0 && value <= MAX_COST;
+}
+
+function isSlack(seconds: number): boolean {
+  return seconds >= 0 && seconds <= MAX_SLACK_SECONDS;
 }
 
 function locationToInput(location: Location): PlanLabeledLocationInput {
@@ -738,10 +851,13 @@ function viaToInput(via: ViaLocation): PlanViaLocationInput {
 
 // Curated PlanRequest → OTP's nested modes/preferences inputs. Only the exposed fields are set; everything
 // else stays undefined so OTP applies its own defaults. Both return undefined when nothing is requested.
-function modesInput(allowed: readonly TransitMode[], excluded: readonly TransitMode[]): PlanModesInput | undefined {
+function modesInput(allowed: readonly TransitMode[], excluded: readonly TransitMode[], transitOnly: boolean): PlanModesInput | undefined {
   const transit = wireModesOrUndefined(allowed)?.map((mode) => ({ mode }));
   const exclude = wireModesOrUndefined(excluded);
-  return transit !== undefined || exclude !== undefined ? { transit: { transit, exclude } } : undefined;
+  return compact({
+    transitOnly: transitOnly ? true : undefined,
+    transit: compact({ transit, exclude }),
+  });
 }
 
 function wireModes(modes: readonly TransitMode[]): WireTransitMode[] {
@@ -753,16 +869,54 @@ function wireModesOrUndefined(modes: readonly TransitMode[]): WireTransitMode[] 
   return wire.length > 0 ? wire : undefined;
 }
 
-function preferencesInput(request: { maxTransfers?: number; wheelchairAccessible: boolean }): PlanPreferencesInput | undefined {
+function preferencesInput(request: {
+  maxTransfers?: number;
+  wheelchairAccessible: boolean;
+  preferences?: RoutePreferences;
+}): PlanPreferencesInput | undefined {
+  const preferences = request.preferences ?? {};
   // The router indexes legs with leg 0 = the initial access (walk, or nothing), so its wire
   // `maximumTransfers` counts boardings = transfers + 1 (wire 0 = walk-only, not exposed here).
   // `maxTransfers` is a transfer count, so map it to boardings: 0 transfers = 1 boarding (direct).
-  const transit = request.maxTransfers != null
-    ? { transfer: { maximumTransfers: request.maxTransfers + 1 } }
-    : undefined;
-  const accessibility = request.wheelchairAccessible ? { wheelchair: { enabled: true } } : undefined;
-  if (transit === undefined && accessibility === undefined) return undefined;
-  return { transit, accessibility };
+  const transfer = compact({
+    cost: preferences.transferCost,
+    slack: slackToWire(preferences.transferSlackSeconds),
+    maximumTransfers: request.maxTransfers != null ? request.maxTransfers + 1 : undefined,
+  });
+  const board = compact({
+    waitReluctance: preferences.waitReluctance,
+    slack: slackToWire(preferences.boardSlackSeconds),
+  });
+  const alight = compact({ slack: slackToWire(preferences.alightSlackSeconds) });
+  const walk = compact({
+    speed: preferences.walkSpeed,
+    reluctance: preferences.walkReluctance,
+    boardCost: preferences.boardCost,
+  });
+  return compact({
+    street: compact({ walk }),
+    transit: compact({ transfer, board, alight, filters: filtersInput(preferences) }),
+    accessibility: request.wheelchairAccessible ? { wheelchair: { enabled: true } } : undefined,
+  });
+}
+
+function filtersInput(preferences: RoutePreferences): TransitFilterInput[] | undefined {
+  const exclude: TransitFilterSelectInput[] = [];
+  if (preferences.excludedRoutes != null && preferences.excludedRoutes.length > 0) {
+    exclude.push({ routes: [...preferences.excludedRoutes] });
+  }
+  if (preferences.excludedAgencies != null && preferences.excludedAgencies.length > 0) {
+    exclude.push({ agencies: [...preferences.excludedAgencies] });
+  }
+  return exclude.length > 0 ? [{ exclude }] : undefined;
+}
+
+function slackToWire(seconds: number | undefined): string | undefined {
+  return seconds != null ? `PT${seconds}S` : undefined;
+}
+
+function compact<T extends object>(value: T): T | undefined {
+  return Object.values(value).some((v) => v !== undefined) ? value : undefined;
 }
 
 // ISO-8601 time-only duration (e.g. "PT1M30S", "PT-90S") → seconds, with a plain-integer-seconds fallback;

@@ -1,5 +1,35 @@
 # Changelog
 
+## 1.11.1
+
+Targets Spider API contract 1.11.
+
+### Added
+
+- **`RoutePreferences`** and **`preferences`** on `PlanOptions` and `PlanStreamRequestOptions` (`plan`,
+  `planStream`, `planStreamNext`, `planStreamPrevious`), kept with the route so `planNext` / `planPrevious` resend
+  it: the contract's routing preferences the SDK didn't expose. `walkSpeed`, `walkReluctance` and `boardCost` are
+  sent under `preferences.street.walk`, `transferCost` and `transferSlackSeconds` under
+  `preferences.transit.transfer` (beside `maximumTransfers` from `maxTransfers`), `waitReluctance` and
+  `boardSlackSeconds` under `preferences.transit.board`, `alightSlackSeconds` under `preferences.transit.alight`, and
+  `excludedRoutes` / `excludedAgencies` (feed-prefixed ids) as one `preferences.transit.filters` exclusion. Slacks
+  are seconds, sent as ISO-8601 (`PT90S`). Each member left undefined keeps the environment's default, and
+  undefined or empty exclusions exclude nothing, so `{}` sends the same body as no preferences. A value outside the
+  contract's fixed range (a walking speed under 0.1 or not finite, a multiplier outside 0.1 to 100000, a cost that
+  isn't an integer from 0 to 1000000, a slack outside 0 to 3600 seconds) fails as `bad_request` on its contract path,
+  such as `preferences.transit.board.slack`, without a request: `plan` returns the failure and a stream yields it as
+  its one `failure` event.
+- **`transitOnly`** on `PlanOptions` and `PlanStreamRequestOptions`, kept with the route so `planNext` /
+  `planPrevious` resend it: true leaves out every itinerary without a transit leg, such as walking the whole way.
+  Sent as `modes.transitOnly` only when true, beside `allowedTransitModes` or `excludedTransitModes`. The contract's
+  `directOnly` stays unexposed.
+- **`PlanOptions.numberOfItineraries`**: the most itineraries a `plan` page holds, from 1 up to the environment's
+  itinerary limit, rejected and never clamped by the API; undefined means the limit. Kept with the route, and
+  `planNext(route, numberOfItineraries?)` / `planPrevious(route, numberOfItineraries?)` take it too: undefined keeps
+  the size the route was asked with, null asks for the limit, and the pages after keep what that page used. Sent as
+  `first` on the first page and after a cursor, as `last` before one. `planStream` sizes itself by `targetResults`
+  and doesn't take it.
+
 ## 1.11.0
 
 Targets Spider API contract 1.11.
