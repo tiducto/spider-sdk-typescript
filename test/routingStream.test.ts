@@ -494,3 +494,61 @@ test('planStream and its continuations with both allowed and excluded transit mo
   }
   assert.equal(mock.calls.length, 0);
 });
+
+test('planStream and its continuations send preferences and transitOnly, and nothing when absent', async () => {
+  const mock = sseFetch([PAGE_INFO_FRAME, DONE_FRAME]);
+  const client = new SpiderClient('https://x', 'k', { fetch: mock.fetch });
+  const options: PlanStreamRequestOptions = {
+    ...STREAM_OPTIONS,
+    maxTransfers: 0,
+    wheelchairAccessible: true,
+    excludedTransitModes: ['TRAM'],
+    transitOnly: true,
+    preferences: { walkReluctance: 2, boardCost: 600, waitReluctance: 1.5, alightSlackSeconds: 60, excludedAgencies: ['1:X'] },
+  };
+
+  await collect(client.routing.planStream(options));
+  await collect(client.routing.planStreamNext(options, 'c-end'));
+  await collect(client.routing.planStreamPrevious(options, 'c-start'));
+  await collect(client.routing.planStream({ ...options, transitOnly: false, preferences: {} }));
+
+  const bodies = mock.calls.map((c) => JSON.parse(c.body));
+  const preferences = {
+    street: { walk: { reluctance: 2, boardCost: 600 } },
+    transit: {
+      transfer: { maximumTransfers: 1 },
+      board: { waitReluctance: 1.5 },
+      alight: { slack: 'PT60S' },
+      filters: [{ exclude: [{ agencies: ['1:X'] }] }],
+    },
+    accessibility: { wheelchair: { enabled: true } },
+  };
+  for (const body of bodies.slice(0, 3)) {
+    assert.deepEqual(body.preferences, preferences);
+    assert.deepEqual(body.modes, { transitOnly: true, transit: { exclude: ['TRAM'] } });
+    assert.equal('first' in body, false);
+    assert.equal('last' in body, false);
+  }
+  assert.deepEqual(bodies[3].preferences, { transit: { transfer: { maximumTransfers: 1 } }, accessibility: { wheelchair: { enabled: true } } });
+  assert.deepEqual(bodies[3].modes, { transit: { exclude: ['TRAM'] } });
+});
+
+test('planStream and its continuations reject a preference out of range on its path before any request', async () => {
+  const mock = sseFetch([PAGE_INFO_FRAME, DONE_FRAME]);
+  const client = new SpiderClient('https://x', 'k', { fetch: mock.fetch });
+  const options = { ...STREAM_OPTIONS, preferences: { boardSlackSeconds: 7200 } };
+
+  for (const stream of [
+    client.routing.planStream(options),
+    client.routing.planStreamNext(options, 'c'),
+    client.routing.planStreamPrevious(options, 'c'),
+  ]) {
+    const events = await collect(stream);
+    assert.equal(events.length, 1);
+    const ev = events[0];
+    assert.equal(ev.type === 'failure' && ev.error.code, 'bad_request');
+    assert.equal(ev.type === 'failure' && ev.error.field, 'preferences.transit.board.slack');
+    assert.equal(ev.type === 'failure' && ev.error.message, 'preferences.transit.board.slack is out of range');
+  }
+  assert.equal(mock.calls.length, 0);
+});

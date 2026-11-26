@@ -31,6 +31,7 @@ export type {
   EstimatedDelays,
   PlanOptions,
   PlanStreamRequestOptions,
+  RoutePreferences,
   PlanStreamEvent,
   DeparturesOptions,
 } from './routing.ts';

@@ -5,6 +5,7 @@ import { CONTRACT_VERSION } from '../src/contract.ts';
 import { SDK_IDENTITY } from '../src/sdk.ts';
 import { mockFetch } from './support.ts';
 import type { Captured } from './support.ts';
+import type { RoutePreferences } from '../src/index.ts';
 
 const PLAN_RESPONSE = {
   itineraries: [
@@ -42,6 +43,20 @@ const PLAN_RESPONSE = {
   routingErrors: [],
   searchDateTime: '2026-07-20T08:00:00Z',
 };
+
+const OUT_OF_RANGE_PREFERENCES: readonly [RoutePreferences, string][] = [
+  [{ walkSpeed: 0.09 }, 'preferences.street.walk.speed'],
+  [{ walkSpeed: Number.POSITIVE_INFINITY }, 'preferences.street.walk.speed'],
+  [{ walkSpeed: Number.NaN }, 'preferences.street.walk.speed'],
+  [{ walkReluctance: 100_001 }, 'preferences.street.walk.reluctance'],
+  [{ boardCost: -1 }, 'preferences.street.walk.boardCost'],
+  [{ boardCost: 1.5 }, 'preferences.street.walk.boardCost'],
+  [{ transferCost: 1_000_001 }, 'preferences.transit.transfer.cost'],
+  [{ transferSlackSeconds: -1 }, 'preferences.transit.transfer.slack'],
+  [{ waitReluctance: 0 }, 'preferences.transit.board.waitReluctance'],
+  [{ boardSlackSeconds: 61 * 60 }, 'preferences.transit.board.slack'],
+  [{ alightSlackSeconds: 3601 }, 'preferences.transit.alight.slack'],
+];
 
 function bodyOf(call: Captured): Record<string, unknown> {
   return JSON.parse(call.body) as Record<string, unknown>;
@@ -1062,4 +1077,179 @@ test('estimatedDelays sends startTime only when set, and rejects a malformed one
     assert.equal(result.error.field, 'startTime');
   }
   assert.equal(mock.calls.length, 2);
+});
+
+test('plan with no or empty preferences sends exactly the body without them', async () => {
+  const mock = mockFetch({ json: PLAN_RESPONSE });
+  const client = new SpiderClient('https://x', 'k', { fetch: mock.fetch });
+  const options = {
+    origin: Location.stop('1:A'),
+    destination: Location.stop('1:B'),
+    departAt: new Date('2026-07-20T08:00:00Z'),
+    maxTransfers: 1,
+    wheelchairAccessible: true,
+  };
+
+  await client.routing.plan(options);
+  await client.routing.plan({ ...options, preferences: {} });
+  await client.routing.plan({ ...options, preferences: { excludedRoutes: [], excludedAgencies: [] } });
+  await client.routing.plan({ ...options, transitOnly: false });
+
+  assert.equal(mock.calls.length, 4);
+  for (const call of mock.calls) assert.equal(call.body, mock.calls[0].body);
+  assert.deepEqual(bodyOf(mock.calls[0]).preferences, {
+    transit: { transfer: { maximumTransfers: 2 } },
+    accessibility: { wheelchair: { enabled: true } },
+  });
+});
+
+test('plan sends every preference at its contract path beside maximumTransfers and wheelchair', async () => {
+  const mock = mockFetch({ json: PLAN_RESPONSE });
+  const client = new SpiderClient('https://x', 'k', { fetch: mock.fetch });
+
+  await client.routing.plan({
+    origin: Location.stop('1:A'),
+    destination: Location.stop('1:B'),
+    maxTransfers: 2,
+    wheelchairAccessible: true,
+    preferences: {
+      walkSpeed: 1.2,
+      walkReluctance: 4.5,
+      boardCost: 600,
+      transferCost: 300,
+      transferSlackSeconds: 120,
+      waitReluctance: 0.5,
+      boardSlackSeconds: 30,
+      alightSlackSeconds: 3600,
+      excludedRoutes: ['1:L4', '1:L9'],
+      excludedAgencies: ['1:DPMB'],
+    },
+  });
+
+  assert.equal(
+    JSON.stringify(bodyOf(mock.calls[0]).preferences),
+    '{"street":{"walk":{"speed":1.2,"reluctance":4.5,"boardCost":600}},'
+      + '"transit":{"transfer":{"cost":300,"slack":"PT120S","maximumTransfers":3},'
+      + '"board":{"waitReluctance":0.5,"slack":"PT30S"},"alight":{"slack":"PT3600S"},'
+      + '"filters":[{"exclude":[{"routes":["1:L4","1:L9"]},{"agencies":["1:DPMB"]}]}]},'
+      + '"accessibility":{"wheelchair":{"enabled":true}}}',
+  );
+});
+
+test('plan sends a single preference as only its own branch', async () => {
+  const mock = mockFetch({ json: PLAN_RESPONSE });
+  const client = new SpiderClient('https://x', 'k', { fetch: mock.fetch });
+  const ends = { origin: Location.stop('1:A'), destination: Location.stop('1:B') };
+
+  await client.routing.plan({ ...ends, preferences: { transferSlackSeconds: 0 } });
+  await client.routing.plan({ ...ends, preferences: { walkSpeed: 0.1 } });
+  await client.routing.plan({ ...ends, preferences: { excludedRoutes: [], excludedAgencies: ['1:A'] } });
+  await client.routing.plan({ ...ends, preferences: { boardSlackSeconds: 90 } });
+
+  assert.deepEqual(mock.calls.map((c) => bodyOf(c).preferences), [
+    { transit: { transfer: { slack: 'PT0S' } } },
+    { street: { walk: { speed: 0.1 } } },
+    { transit: { filters: [{ exclude: [{ agencies: ['1:A'] }] }] } },
+    { transit: { board: { slack: 'PT90S' } } },
+  ]);
+});
+
+test('plan rejects a preference out of its contract range as bad_request on its path without a request', async () => {
+  const mock = mockFetch({ json: PLAN_RESPONSE });
+  const client = new SpiderClient('https://x', 'k', { fetch: mock.fetch });
+
+  for (const [preferences, field] of OUT_OF_RANGE_PREFERENCES) {
+    const result = await client.routing.plan({ origin: Location.stop('1:A'), destination: Location.stop('1:B'), preferences });
+    assert.equal(result.isSuccess, false, field);
+    if (!result.isSuccess) {
+      assert.equal(result.error.code, 'bad_request');
+      assert.equal(result.error.field, field);
+      assert.equal(result.error.message, `${field} is out of range`);
+    }
+  }
+  assert.equal(mock.calls.length, 0);
+
+  const inRange = await client.routing.plan({
+    origin: Location.stop('1:A'),
+    destination: Location.stop('1:B'),
+    preferences: {
+      walkSpeed: 0.1,
+      walkReluctance: 100_000,
+      boardCost: 0,
+      transferCost: 1_000_000,
+      transferSlackSeconds: 3600,
+      waitReluctance: 0.1,
+      boardSlackSeconds: 0,
+      alightSlackSeconds: 3600,
+    },
+  });
+  assert.equal(inRange.isSuccess, true);
+});
+
+test('plan sends transitOnly as modes.transitOnly beside the mode filters, and nothing when false', async () => {
+  const mock = mockFetch({ json: PLAN_RESPONSE });
+  const client = new SpiderClient('https://x', 'k', { fetch: mock.fetch });
+  const ends = { origin: Location.stop('1:A'), destination: Location.stop('1:B') };
+
+  await client.routing.plan({ ...ends, transitOnly: true });
+  await client.routing.plan({ ...ends, transitOnly: true, excludedTransitModes: ['TRAM'] });
+  await client.routing.plan({ ...ends, transitOnly: true, allowedTransitModes: ['BUS'] });
+  await client.routing.plan({ ...ends, transitOnly: false });
+
+  assert.equal(JSON.stringify(bodyOf(mock.calls[0]).modes), '{"transitOnly":true}');
+  assert.equal(JSON.stringify(bodyOf(mock.calls[1]).modes), '{"transitOnly":true,"transit":{"exclude":["TRAM"]}}');
+  assert.equal(JSON.stringify(bodyOf(mock.calls[2]).modes), '{"transitOnly":true,"transit":{"transit":[{"mode":"BUS"}]}}');
+  assert.equal('modes' in bodyOf(mock.calls[3]), false);
+});
+
+test('planNext and planPrevious resend preferences and transitOnly', async () => {
+  const mock = mockFetch({ json: PLAN_RESPONSE });
+  const client = new SpiderClient('https://x', 'k', { fetch: mock.fetch });
+
+  const first = await client.routing.plan({
+    origin: Location.stop('1:A'),
+    destination: Location.stop('1:B'),
+    transitOnly: true,
+    preferences: { walkSpeed: 1, transferSlackSeconds: 180, excludedRoutes: ['1:L4'] },
+  });
+  if (!first.isSuccess) throw new Error(first.error.code);
+  await client.routing.planNext(first.data);
+  await client.routing.planPrevious(first.data);
+  await client.routing.plan({ origin: Location.stop('1:A'), destination: Location.stop('1:B') });
+
+  const expected = {
+    street: { walk: { speed: 1 } },
+    transit: { transfer: { slack: 'PT180S' }, filters: [{ exclude: [{ routes: ['1:L4'] }] }] },
+  };
+  const bodies = mock.calls.map(bodyOf);
+  assert.deepEqual(bodies.map((b) => b.preferences), [expected, expected, expected, undefined]);
+  assert.deepEqual(bodies.map((b) => b.modes), [{ transitOnly: true }, { transitOnly: true }, { transitOnly: true }, undefined]);
+});
+
+test('numberOfItineraries is first on the first page and after a cursor, last before one, and kept unless overridden', async () => {
+  const mock = mockFetch({ json: PLAN_RESPONSE });
+  const client = new SpiderClient('https://x', 'k', { fetch: mock.fetch });
+
+  const sized = await client.routing.plan({ origin: Location.stop('1:A'), destination: Location.stop('1:B'), numberOfItineraries: 3 });
+  if (!sized.isSuccess) throw new Error(sized.error.code);
+  await client.routing.planNext(sized.data);
+  await client.routing.planPrevious(sized.data);
+  const next = await client.routing.planNext(sized.data, 1);
+  if (next == null || !next.isSuccess) throw new Error('expected a next page');
+  await client.routing.planPrevious(sized.data, null);
+  await client.routing.planNext(next.data);
+  await client.routing.plan({ origin: Location.stop('1:A'), destination: Location.stop('1:B') });
+
+  const bodies = mock.calls.map(bodyOf);
+  assert.deepEqual(bodies.map((b) => [b.first, b.last]), [
+    [3, undefined],
+    [3, undefined],
+    [undefined, 3],
+    [1, undefined],
+    [undefined, undefined],
+    [1, undefined],
+    [undefined, undefined],
+  ]);
+  assert.deepEqual(bodies.map((b) => b.after), [undefined, 'c-end', undefined, 'c-end', undefined, 'c-end', undefined]);
+  assert.deepEqual(bodies.map((b) => b.before), [undefined, undefined, 'c-start', undefined, 'c-start', undefined, undefined]);
 });
