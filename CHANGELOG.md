@@ -1,6 +1,6 @@
 # Changelog
 
-## 1.11.1
+## Unreleased
 
 Targets Spider API contract 1.11.
 
