@@ -24,8 +24,10 @@ import type {
   EstimatedDelaysResponse,
   Itinerary as ItineraryWire,
   Leg as LegWire,
+  ParentStation as ParentStationWire,
   PlanLabeledLocationInput,
   PlanModesInput,
+  PlanTransitModePreferenceInput,
   PlanPreferencesInput,
   PlanStreamChunkEvent,
   PlanStreamPageInfoEvent,
@@ -37,6 +39,7 @@ import type {
   TransitFilterInput,
   TransitFilterSelectInput,
   TransitMode as WireTransitMode,
+  TransitModeCostInput,
   TripRequest,
   TripResponse,
   TripTimetable,
@@ -66,6 +69,15 @@ export interface TripVehicle {
   readonly wifi: boolean | null;
   /** Whether the vehicle accepts card payment on board; null when unknown. */
   readonly cardPayment: boolean | null;
+}
+
+/**
+ * The station a stop belongs to (GTFS `parent_station`). Its `gtfsId` is a station id that {@link Location.stop} and
+ * {@link SpiderRouting.departures} accept, for the whole station.
+ */
+export interface ParentStation {
+  readonly gtfsId: string;
+  readonly name: string;
 }
 
 export interface Leg {
@@ -100,6 +112,10 @@ export interface Leg {
   readonly toPlatformCode: string | null;
   readonly fromZoneId: string | null;
   readonly toZoneId: string | null;
+  /** The station the leg's `from` stop belongs to; null when that stop has none or the leg starts at a coordinate. */
+  readonly fromParentStation: ParentStation | null;
+  /** The station the leg's `to` stop belongs to; null when that stop has none or the leg ends at a coordinate. */
+  readonly toParentStation: ParentStation | null;
   readonly routeGtfsId: string | null;
   readonly routeShortName: string | null;
   readonly routeLongName: string | null;
@@ -250,6 +266,8 @@ export interface TripStop {
   readonly wheelchairBoarding: WheelchairBoarding | null;
   readonly platformCode: string | null;
   readonly zoneId: string | null;
+  /** The station the stop belongs to; null when it has none. */
+  readonly parentStation: ParentStation | null;
   /** The stop's position in the trip: increasing along it, not necessarily from 0 or consecutive. A leg's `fromStopPosition` or `toStopPosition`, or a departure's `stopPosition`, equal to it names this stop, also on a trip that visits one stop twice. Realtime that adds or removes stops can change it. */
   readonly stopPosition: number | null;
   /** Index into {@link TripDetails.geometry} of where the stop sits on the trip's line; null when the trip has no geometry or the stop has no point on it. */
@@ -258,6 +276,22 @@ export interface TripStop {
   readonly pickupType: PickupDropoffType | null;
   /** How a rider alights here; `COORDINATE_WITH_DRIVER` is a stop on request. Null when the stop is canceled. */
   readonly dropoffType: PickupDropoffType | null;
+}
+
+/** Result of {@link SpiderRouting.stopDepartures}: the stop or station asked for, with its departures. */
+export interface StopDepartures {
+  /** The id asked for: a stop's, or a station's for the departures of all its stops. */
+  readonly gtfsId: string;
+  readonly name: string;
+  /** Null for a station's departures. */
+  readonly wheelchairBoarding: WheelchairBoarding | null;
+  /**
+   * The station the stop belongs to; its `gtfsId` asks for the whole station's departures. Null for a station's
+   * departures and for a stop without one.
+   */
+  readonly parentStation: ParentStation | null;
+  /** The departures, as {@link SpiderRouting.departures} returns them. */
+  readonly departures: readonly Departure[];
 }
 
 export interface TripDetails {
@@ -366,6 +400,14 @@ export interface RoutePreferences {
   readonly excludedRoutes?: readonly string[];
   /** Leave out every trip of these feed-prefixed agency ids (`<feedId>:<id>`), as for `excludedRoutes`. */
   readonly excludedAgencies?: readonly string[];
+  /**
+   * How much worse riding a transit mode is than riding for the same time on another, per mode: a multiplier from
+   * 0.1 to 100000, above 1 avoiding the mode, below 1 favouring it. A mode not listed keeps 1. It restricts no mode,
+   * and a mode `excludedTransitModes` names stays excluded. With `allowedTransitModes`, each allowed mode carries its
+   * own reluctance and one for a mode not allowed is dropped. WALK/UNKNOWN and the other non-transit modes drop out.
+   * Undefined/empty changes no cost.
+   */
+  readonly modeReluctance?: Partial<Record<TransitMode, number>>;
 }
 
 /**
@@ -437,6 +479,8 @@ const MIN_MULTIPLIER = 0.1;
 const MAX_MULTIPLIER = 100_000;
 const MAX_COST = 1_000_000;
 const MAX_SLACK_SECONDS = 60 * 60;
+const MODE_RELUCTANCE_COSTS = 'modes.transit.costs.reluctance';
+const MODE_RELUCTANCE_ALLOWED = 'modes.transit.transit.cost.reluctance';
 
 // The OTP transit modes valid in a modes filter — the public TransitMode union also carries street/leg
 // values (WALK, BICYCLE, CAR, TRANSIT, UNKNOWN) that are not transit modes and must not reach the wire.
@@ -501,7 +545,7 @@ export class SpiderRouting {
     };
     const invalid = invalidModes(request.allowedTransitModes, request.excludedTransitModes)
       ?? invalidVia(request.via)
-      ?? invalidPreferences(request.preferences);
+      ?? invalidPreferences(request.preferences, request.allowedTransitModes);
     if (invalid != null) return failure(invalid);
     return this.page(request);
   }
@@ -551,7 +595,12 @@ export class SpiderRouting {
       origin: locationToInput(options.origin),
       destination: locationToInput(options.destination),
       via: via.length > 0 ? via.map(viaToInput) : undefined,
-      modes: modesInput(options.allowedTransitModes ?? [], options.excludedTransitModes ?? [], options.transitOnly ?? false),
+      modes: modesInput(
+        options.allowedTransitModes ?? [],
+        options.excludedTransitModes ?? [],
+        options.transitOnly ?? false,
+        options.preferences?.modeReluctance,
+      ),
       preferences: preferencesInput({
         maxTransfers: options.maxTransfers,
         wheelchairAccessible: options.wheelchairAccessible ?? false,
@@ -637,13 +686,28 @@ export class SpiderRouting {
 
   /**
    * Upcoming departures from a stop or station: `numberOfDepartures` (default 30, up to the environment's
-   * limit) within `options.timeRangeSeconds` (default 24 h) from `options.startTime` (default now).
+   * limit) within `options.timeRangeSeconds` (default 24 h) from `options.startTime` (default now). The departures
+   * of {@link stopDepartures}, without the stop.
    */
   async departures(
     stopId: string,
     numberOfDepartures = DEFAULT_NUMBER_OF_DEPARTURES,
     options?: DeparturesOptions,
   ): Promise<SpiderResult<Departure[]>> {
+    const result = await this.stopDepartures(stopId, numberOfDepartures, options);
+    return result.isSuccess ? success([...result.data.departures]) : result;
+  }
+
+  /**
+   * The stop or station `stopId` names, with its upcoming departures: the same request as {@link departures}, which
+   * also gives the stop's name, wheelchair boarding and parent station. An id that resolves to no stop or station
+   * fails as {@link departures} does.
+   */
+  async stopDepartures(
+    stopId: string,
+    numberOfDepartures = DEFAULT_NUMBER_OF_DEPARTURES,
+    options?: DeparturesOptions,
+  ): Promise<SpiderResult<StopDepartures>> {
     const timeRange = Math.floor(options?.timeRangeSeconds ?? MAX_TIME_RANGE_SECONDS);
     if (!(timeRange > 0 && timeRange <= MAX_TIME_RANGE_SECONDS)) return failure(badRequest('timeRange'));
     try {
@@ -659,7 +723,7 @@ export class SpiderRouting {
       if (stop == null) {
         throw new TransportError('no_data', `routing returned no stop or station for id=${stopId}`);
       }
-      return success(mapDepartures(stop));
+      return success(mapStopDepartures(stop));
     } catch (e) {
       return failure(toSpiderError(e));
     }
@@ -734,7 +798,12 @@ export class SpiderRouting {
       origin: locationToInput(request.origin),
       destination: locationToInput(request.destination),
       via: request.via.length > 0 ? request.via.map(viaToInput) : undefined,
-      modes: modesInput(request.allowedTransitModes, request.excludedTransitModes, request.transitOnly),
+      modes: modesInput(
+        request.allowedTransitModes,
+        request.excludedTransitModes,
+        request.transitOnly,
+        request.preferences?.modeReluctance,
+      ),
       preferences: preferencesInput(request),
       searchWindow: `PT${Math.floor(request.searchWindowMinutes)}M`,
       first: cursor != null && 'before' in cursor ? undefined : request.numberOfItineraries,
@@ -784,7 +853,7 @@ function invalidStreamOptions(options: PlanStreamRequestOptions): SpiderError | 
   if (!(Math.floor(options.maxWindowMinutes) >= MIN_STREAM_WINDOW_MINUTES)) return badRequest('maxWindow');
   return invalidModes(options.allowedTransitModes ?? [], options.excludedTransitModes ?? [])
     ?? invalidVia(options.via ?? [])
-    ?? invalidPreferences(options.preferences);
+    ?? invalidPreferences(options.preferences, options.allowedTransitModes ?? []);
 }
 
 // The API takes an allow-list or an exclude-list, never both non-empty: the same field and wording as its own 400.
@@ -803,8 +872,12 @@ function invalidVia(via: readonly ViaLocation[]): SpiderError | null {
   return null;
 }
 
-function invalidPreferences(preferences: RoutePreferences | undefined): SpiderError | null {
+function invalidPreferences(preferences: RoutePreferences | undefined, allowed: readonly TransitMode[]): SpiderError | null {
   if (preferences == null) return null;
+  const reluctanceField = wireModes(allowed).length > 0 ? MODE_RELUCTANCE_ALLOWED : MODE_RELUCTANCE_COSTS;
+  for (const reluctance of Object.values(preferences.modeReluctance ?? {})) {
+    if (reluctance != null && !isMultiplier(reluctance)) return badRequest(reluctanceField);
+  }
   const checks: [number | undefined, string, (value: number) => boolean][] = [
     [preferences.walkSpeed, `${WALK_PREFERENCES}.speed`, (v) => Number.isFinite(v) && v >= MIN_MULTIPLIER],
     [preferences.walkReluctance, `${WALK_PREFERENCES}.reluctance`, isMultiplier],
@@ -822,7 +895,7 @@ function invalidPreferences(preferences: RoutePreferences | undefined): SpiderEr
 }
 
 function isMultiplier(value: number): boolean {
-  return value >= MIN_MULTIPLIER && value <= MAX_MULTIPLIER;
+  return Number.isFinite(value) && value >= MIN_MULTIPLIER && value <= MAX_MULTIPLIER;
 }
 
 function isCost(value: number): boolean {
@@ -851,13 +924,34 @@ function viaToInput(via: ViaLocation): PlanViaLocationInput {
 
 // Curated PlanRequest → OTP's nested modes/preferences inputs. Only the exposed fields are set; everything
 // else stays undefined so OTP applies its own defaults. Both return undefined when nothing is requested.
-function modesInput(allowed: readonly TransitMode[], excluded: readonly TransitMode[], transitOnly: boolean): PlanModesInput | undefined {
-  const transit = wireModesOrUndefined(allowed)?.map((mode) => ({ mode }));
+// Per-mode reluctances ride the allowed list's own entries when there is one, and `costs` otherwise, in the
+// TransitMode declaration order: the API rejects `costs` beside a non-empty `transit`.
+function modesInput(
+  allowed: readonly TransitMode[],
+  excluded: readonly TransitMode[],
+  transitOnly: boolean,
+  modeReluctance: Partial<Record<TransitMode, number>> | undefined,
+): PlanModesInput | undefined {
+  const reluctanceOf = (mode: TransitMode): number | undefined => modeReluctance?.[mode] ?? undefined;
+  const transit = wireModesOrUndefined(allowed)?.map((mode): PlanTransitModePreferenceInput => {
+    const reluctance = reluctanceOf(mode as TransitMode);
+    return reluctance != null ? { mode, cost: { reluctance } } : { mode };
+  });
   const exclude = wireModesOrUndefined(excluded);
+  const costs = transit == null ? costsInput(reluctanceOf) : undefined;
   return compact({
     transitOnly: transitOnly ? true : undefined,
-    transit: compact({ transit, exclude }),
+    transit: compact({ transit, exclude, costs }),
   });
+}
+
+function costsInput(reluctanceOf: (mode: TransitMode) => number | undefined): TransitModeCostInput[] | undefined {
+  const costs: TransitModeCostInput[] = [];
+  for (const mode of WIRE_TRANSIT_MODES) {
+    const reluctance = reluctanceOf(mode as TransitMode);
+    if (reluctance != null) costs.push({ mode, reluctance });
+  }
+  return costs.length > 0 ? costs : undefined;
 }
 
 function wireModes(modes: readonly TransitMode[]): WireTransitMode[] {
@@ -1047,6 +1141,8 @@ function mapLeg(leg: LegWire): Leg {
     toPlatformCode: toStop?.platformCode ?? null,
     fromZoneId: fromStop?.zoneId ?? null,
     toZoneId: toStop?.zoneId ?? null,
+    fromParentStation: mapParentStation(fromStop?.parentStation),
+    toParentStation: mapParentStation(toStop?.parentStation),
     routeGtfsId: route?.gtfsId ?? null,
     routeShortName: route?.shortName ?? null,
     routeLongName: route?.longName ?? null,
@@ -1077,6 +1173,20 @@ function mapTripVehicle(v: TripVehicleWire | null | undefined): TripVehicle | nu
     airConditioning: v.airConditioning ?? null,
     wifi: v.wifi ?? null,
     cardPayment: v.cardPayment ?? null,
+  };
+}
+
+function mapParentStation(station: ParentStationWire | null | undefined): ParentStation | null {
+  return station != null ? { gtfsId: station.gtfsId, name: station.name } : null;
+}
+
+function mapStopDepartures(stop: DepartureBoard): StopDepartures {
+  return {
+    gtfsId: stop.gtfsId,
+    name: stop.name,
+    wheelchairBoarding: wheelchairFromWire(stop.wheelchairBoarding),
+    parentStation: mapParentStation(stop.parentStation),
+    departures: mapDepartures(stop),
   };
 }
 
@@ -1128,6 +1238,7 @@ function mapTrip(trip: TripTimetable, serviceDate: string): TripDetails {
       wheelchairBoarding: wheelchairFromWire(s.wheelchairBoarding),
       platformCode: s.platformCode ?? null,
       zoneId: s.zoneId ?? null,
+      parentStation: mapParentStation(s.parentStation),
       stopPosition: st.stopPosition ?? null,
       geometryIndex: st.geometryIndex ?? null,
       pickupType: pickupDropoffTypeFromWire(st.pickupType),

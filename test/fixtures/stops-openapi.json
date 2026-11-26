@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Tiducto Transit API — Stops",
-    "version": "1.11",
+    "version": "1.12",
     "description": "Stop text and geo search, key-authenticated. Companion to routing, realtime and places; the four share one pack version. A member that has no value is absent, never null. `wheelchairBoarding` is the feed's GTFS integer code, and an unrecognised code passes through unchanged. A path that matches no operation, and every path of an environment without a stop-search deployment, is the gateway's plain-text `404 Not Found`, outside every operation."
   },
   "servers": [
@@ -25,7 +25,7 @@
     "/stops/v1/search": {
       "post": {
         "summary": "Search Stops",
-        "description": "Stop text and geo search over the environment's stops, a station's platforms folded into it.\n- `POST` only; another method is a 405 `method_not_allowed`. Any query parameter is a 400 `<name> is not allowed`.\n- The body takes `q` and `limit` (1 to 50), and optionally `filter` and `sort`. A key not listed is refused whatever its value, null included; `null` on an optional member means absent. Nothing is clamped.\n- `sort` orders by distance with `_geoPoint(lat, lng):asc` or `:desc`; each hit then carries `_geoDistance` in metres.\n- A `filter` or `sort` expression the index refuses is a 400 `filter is invalid` or `sort is invalid`.\n- A member that has no value is absent from a hit, never null.",
+        "description": "Stop text and geo search over the environment's stops, a station's stops folded into it.\n- `POST` only; another method is a 405 `method_not_allowed`. Any query parameter is a 400 `<name> is not allowed`.\n- The body takes `q` and `limit` (1 to 50), and optionally `filter` and `sort`. A key not listed is refused whatever its value, null included; `null` on an optional member means absent. Nothing is clamped.\n- `sort` orders by distance with `_geoPoint(lat, lng):asc` or `:desc`; each hit then carries `_geoDistance` in metres.\n- A `filter` or `sort` expression the index refuses is a 400 `filter is invalid` or `sort is invalid`.\n- A member that has no value is absent from a hit, never null.",
         "operationId": "stops_search",
         "x-surface": "stops",
         "requestBody": {
@@ -264,7 +264,7 @@
       },
       "StopHit": {
         "type": "object",
-        "description": "One stop. A station's platforms are folded into it, so the station is returned instead of its platforms. Admin levels are present only where the deployment enriched them; the other optional members are absent when the feed doesn't provide them. A hit can carry further members not listed here; they aren't part of the contract and may change or disappear.",
+        "description": "One stop. A station's stops are folded into it, so the station is returned instead of them. Admin levels are present only where the deployment enriched them; the other optional members are absent when the feed doesn't provide them. A hit can carry further members not listed here; they aren't part of the contract and may change or disappear.",
         "properties": {
           "gtfsId": {
             "type": "string",
@@ -280,11 +280,11 @@
           "wheelchairBoarding": {
             "type": "integer",
             "format": "int32",
-            "description": "GTFS `wheelchair_boarding`: `1` some vehicles here can be boarded by a rider in a wheelchair, `2` wheelchair boarding isn't possible here, `0` no information. A station's value is the station's own; its platforms' values aren't combined into it. Absent when the feed doesn't set it, which also means no information. Any other value is passed through from the feed unchanged."
+            "description": "GTFS `wheelchair_boarding`: `1` some vehicles here can be boarded by a rider in a wheelchair, `2` wheelchair boarding isn't possible here, `0` no information. A station's value is the station's own; its stops' values aren't combined into it. Absent when the feed doesn't set it, which also means no information. Any other value is passed through from the feed unchanged."
           },
           "modes": {
             "type": "array",
-            "description": "Modes of the routes serving the stop, each once, as the mode names routing returns for those routes (e.g. `BUS`, `TRAM`, `RAIL`), ordered by scheduled calls at the stop, most first, ties by name. A station's modes cover all its platforms. Absent when no route serves the stop.",
+            "description": "Modes of the routes serving the stop, each once, as the mode names routing returns for those routes (e.g. `BUS`, `TRAM`, `RAIL`), ordered by scheduled calls at the stop, most first, ties by name. A station's modes cover all its stops. Absent when no route serves the stop.",
             "items": {
               "type": "string"
             }

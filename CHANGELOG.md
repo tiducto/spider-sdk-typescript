@@ -1,10 +1,29 @@
 # Changelog
 
-## Unreleased
+## 1.12.0
 
-Targets Spider API contract 1.11.
+Targets Spider API contract 1.12.
 
 ### Added
+
+- **`RoutePreferences.modeReluctance`** (`Partial<Record<TransitMode, number>>`), on every `plan` and `planStream`
+  call and kept with the route so `planNext` / `planPrevious` resend it: how much worse riding a mode is, a
+  multiplier from 0.1 to 100000 per mode, with a mode not listed at 1. It restricts no mode, and a mode
+  `excludedTransitModes` names stays excluded. Without `allowedTransitModes` it is sent as `modes.transit.costs`
+  (beside `exclude`), in the `TransitMode` declaration order; with `allowedTransitModes` each allowed mode carries its
+  reluctance as `modes.transit.transit[].cost.reluctance`, a reluctance for a mode not allowed is dropped, and
+  `costs` is never sent. Undefined or `{}` sends nothing, and WALK / UNKNOWN drop out. A reluctance outside 0.1 to
+  100000 or not finite fails as `bad_request` on `modes.transit.costs.reluctance` (or
+  `modes.transit.transit.cost.reluctance` with an allowed list) without a request.
+- **`ParentStation`** (`gtfsId`, `name`): the station a stop belongs to, whose `gtfsId` plans and departures accept
+  for the whole station.
+  - **`Leg.fromParentStation`** and **`Leg.toParentStation`** (`plan` and `planStream`): null when the leg's stop
+    has no station, or the leg end is a coordinate.
+  - **`TripStop.parentStation`**: null when the stop has no station.
+- **`stopDepartures(stopId, numberOfDepartures?, options?)`**: the same request as `departures`, returning a
+  **`StopDepartures`** with the stop's `gtfsId`, `name`, `wheelchairBoarding` (null for a station), `parentStation`
+  (null for a station and for a stop without one) and its `departures`. `departures` keeps its signature and
+  behaviour, an id that resolves to no stop or station included.
 
 - **`RoutePreferences`** and **`preferences`** on `PlanOptions` and `PlanStreamRequestOptions` (`plan`,
   `planStream`, `planStreamNext`, `planStreamPrevious`), kept with the route so `planNext` / `planPrevious` resend
