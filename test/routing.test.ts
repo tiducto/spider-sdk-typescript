@@ -1253,3 +1253,232 @@ test('numberOfItineraries is first on the first page and after a cursor, last be
   assert.deepEqual(bodies.map((b) => b.after), [undefined, 'c-end', undefined, 'c-end', undefined, 'c-end', undefined]);
   assert.deepEqual(bodies.map((b) => b.before), [undefined, undefined, 'c-start', undefined, 'c-start', undefined, undefined]);
 });
+
+test('plan sends modeReluctance as modes.transit.costs in TransitMode order, beside exclude', async () => {
+  const mock = mockFetch({ json: PLAN_RESPONSE });
+  const client = new SpiderClient('https://x', 'k', { fetch: mock.fetch });
+  const ends = { origin: Location.stop('1:A'), destination: Location.stop('1:B') };
+
+  await client.routing.plan({
+    ...ends,
+    excludedTransitModes: ['RAIL'],
+    preferences: { modeReluctance: { TRAM: 0.5, BUS: 2, RAIL: 3 } },
+  });
+  await client.routing.plan({ ...ends, preferences: { modeReluctance: { TROLLEYBUS: 100_000, AIRPLANE: 0.1, WALK: 4, UNKNOWN: 5 } } });
+
+  assert.equal(
+    JSON.stringify(bodyOf(mock.calls[0]).modes),
+    '{"transit":{"exclude":["RAIL"],"costs":[{"mode":"BUS","reluctance":2},{"mode":"RAIL","reluctance":3},{"mode":"TRAM","reluctance":0.5}]}}',
+  );
+  assert.equal(
+    JSON.stringify(bodyOf(mock.calls[1]).modes),
+    '{"transit":{"costs":[{"mode":"AIRPLANE","reluctance":0.1},{"mode":"TROLLEYBUS","reluctance":100000}]}}',
+  );
+});
+
+test('plan folds modeReluctance into the allowed list and drops a mode not allowed, never sending costs', async () => {
+  const mock = mockFetch({ json: PLAN_RESPONSE });
+  const client = new SpiderClient('https://x', 'k', { fetch: mock.fetch });
+
+  await client.routing.plan({
+    origin: Location.stop('1:A'),
+    destination: Location.stop('1:B'),
+    allowedTransitModes: ['TRAM', 'BUS'],
+    preferences: { modeReluctance: { BUS: 1.5, RAIL: 9 } },
+  });
+
+  assert.equal(
+    JSON.stringify(bodyOf(mock.calls[0]).modes),
+    '{"transit":{"transit":[{"mode":"TRAM"},{"mode":"BUS","cost":{"reluctance":1.5}}]}}',
+  );
+});
+
+test('plan with no, empty or only non-transit modeReluctance sends no costs', async () => {
+  const mock = mockFetch({ json: PLAN_RESPONSE });
+  const client = new SpiderClient('https://x', 'k', { fetch: mock.fetch });
+  const ends = { origin: Location.stop('1:A'), destination: Location.stop('1:B'), excludedTransitModes: ['TRAM'] } as const;
+
+  await client.routing.plan(ends);
+  await client.routing.plan({ ...ends, preferences: { modeReluctance: {} } });
+  await client.routing.plan({ ...ends, preferences: { modeReluctance: { WALK: 2 } } });
+  await client.routing.plan({ ...ends, preferences: { modeReluctance: { BUS: undefined } } });
+  await client.routing.plan({ origin: Location.stop('1:A'), destination: Location.stop('1:B'), preferences: { modeReluctance: {} } });
+
+  for (const call of mock.calls.slice(0, 4)) assert.equal(call.body, mock.calls[0].body);
+  assert.deepEqual(bodyOf(mock.calls[0]).modes, { transit: { exclude: ['TRAM'] } });
+  assert.equal('modes' in bodyOf(mock.calls[4]), false);
+  assert.equal('preferences' in bodyOf(mock.calls[4]), false);
+});
+
+test('plan rejects a mode reluctance out of range on its modes path without a request', async () => {
+  const mock = mockFetch({ json: PLAN_RESPONSE });
+  const client = new SpiderClient('https://x', 'k', { fetch: mock.fetch });
+  const ends = { origin: Location.stop('1:A'), destination: Location.stop('1:B') };
+  const cases: [Parameters<typeof client.routing.plan>[0], string][] = [
+    [{ ...ends, preferences: { modeReluctance: { BUS: 0.09 } } }, 'modes.transit.costs.reluctance'],
+    [{ ...ends, preferences: { modeReluctance: { BUS: 100_001 } } }, 'modes.transit.costs.reluctance'],
+    [{ ...ends, preferences: { modeReluctance: { TRAM: Number.NaN } } }, 'modes.transit.costs.reluctance'],
+    [{ ...ends, preferences: { modeReluctance: { TRAM: Number.POSITIVE_INFINITY } } }, 'modes.transit.costs.reluctance'],
+    [{ ...ends, allowedTransitModes: ['BUS'], preferences: { modeReluctance: { BUS: 0 } } }, 'modes.transit.transit.cost.reluctance'],
+  ];
+
+  for (const [options, field] of cases) {
+    const result = await client.routing.plan(options);
+    assert.equal(result.isSuccess, false, field);
+    if (!result.isSuccess) {
+      assert.equal(result.error.code, 'bad_request');
+      assert.equal(result.error.field, field);
+      assert.equal(result.error.message, `${field} is out of range`);
+    }
+  }
+  assert.equal(mock.calls.length, 0);
+});
+
+test('planNext and planPrevious resend modeReluctance', async () => {
+  const mock = mockFetch({ json: PLAN_RESPONSE });
+  const client = new SpiderClient('https://x', 'k', { fetch: mock.fetch });
+
+  const first = await client.routing.plan({
+    origin: Location.stop('1:A'),
+    destination: Location.stop('1:B'),
+    excludedTransitModes: ['RAIL'],
+    preferences: { modeReluctance: { TRAM: 0.5 } },
+  });
+  if (!first.isSuccess) throw new Error(first.error.code);
+  await client.routing.planNext(first.data);
+  await client.routing.planPrevious(first.data);
+
+  const modes = { transit: { exclude: ['RAIL'], costs: [{ mode: 'TRAM', reluctance: 0.5 }] } };
+  assert.deepEqual(mock.calls.map((c) => bodyOf(c).modes), [modes, modes, modes]);
+});
+
+test('plan maps each leg end stop parent station, null without one or at a coordinate', async () => {
+  const leg = PLAN_RESPONSE.itineraries[0].legs[0];
+  const mock = mockFetch({
+    json: {
+      ...PLAN_RESPONSE,
+      itineraries: [{
+        ...PLAN_RESPONSE.itineraries[0],
+        legs: [
+          {
+            ...leg,
+            from: { ...leg.from, stop: { ...leg.from.stop, parentStation: { gtfsId: '1:ST_A', name: 'Station A' } } },
+            to: { ...leg.to, stop: { ...leg.to.stop, parentStation: null } },
+          },
+          { ...leg, mode: 'WALK', from: { name: 'B', stopPosition: null, stop: leg.to.stop }, to: { name: 'Destination', stopPosition: null, stop: null } },
+        ],
+      }],
+    },
+  });
+  const client = new SpiderClient('https://x', 'k', { fetch: mock.fetch });
+
+  const result = await client.routing.plan({ origin: Location.stop('1:A'), destination: Location.coordinate(49.2, 16.6) });
+  if (!result.isSuccess) throw new Error(result.error.code);
+  const [ride, walk] = result.data.edges[0].itinerary.legs;
+  assert.deepEqual(ride.fromParentStation, { gtfsId: '1:ST_A', name: 'Station A' });
+  assert.equal(ride.toParentStation, null);
+  assert.equal(walk.fromParentStation, null);
+  assert.equal(walk.toParentStation, null);
+});
+
+test('trip maps each stop parent station, null without one', async () => {
+  const stoptime = (stop: Record<string, unknown>) => ({
+    serviceDay: 1000,
+    scheduledArrival: 60,
+    scheduledDeparture: 60,
+    realtimeArrival: 60,
+    realtimeDeparture: 60,
+    realtime: false,
+    realtimeState: 'SCHEDULED',
+    typicalDelay: null,
+    stopPosition: 1,
+    pickupType: 'SCHEDULED',
+    dropoffType: 'SCHEDULED',
+    stop: { name: 'S', lat: 49.1, lon: 16.6, wheelchairBoarding: 'POSSIBLE', platformCode: null, zoneId: null, ...stop },
+  });
+  const mock = mockFetch({
+    json: {
+      trip: {
+        ...TRIP_WITHOUT_STOPS.trip,
+        stoptimesForDate: [
+          stoptime({ gtfsId: '1:s1', parentStation: { gtfsId: '1:ST1', name: 'Station 1' } }),
+          stoptime({ gtfsId: '1:s2', parentStation: null }),
+        ],
+      },
+    },
+  });
+  const client = new SpiderClient('https://x', 'k', { fetch: mock.fetch });
+
+  const result = await client.routing.trip('1:t1', '2026-07-20');
+  if (!result.isSuccess) throw new Error(result.error.code);
+  assert.deepEqual(result.data.stops.map((s) => s.parentStation), [{ gtfsId: '1:ST1', name: 'Station 1' }, null]);
+});
+
+test('stopDepartures sends the departures body and maps the stop with its parent station and departures', async () => {
+  const mock = mockFetch({
+    json: {
+      stop: {
+        gtfsId: '1:U1Z1',
+        name: 'Main',
+        wheelchairBoarding: 'POSSIBLE',
+        parentStation: { gtfsId: '1:U1', name: 'Main station' },
+        stoptimesWithoutPatterns: [departureRow({})],
+      },
+    },
+  });
+  const client = new SpiderClient('https://x', 'k', { fetch: mock.fetch });
+
+  const result = await client.routing.stopDepartures('1:U1Z1', 5, { startTime: 1_784_534_400_000, reliability: 'SAFE' });
+  await client.routing.departures('1:U1Z1', 5, { startTime: 1_784_534_400_000, reliability: 'SAFE' });
+
+  assert.equal(mock.calls[0].url, 'https://x/routing/v1/departures');
+  assert.equal(mock.calls[0].body, '{"id":"1:U1Z1","numberOfDepartures":5,"startTime":1784534400,"timeRange":86400,"reliability":"SAFE"}');
+  assert.equal(mock.calls[1].body, mock.calls[0].body);
+  if (!result.isSuccess) throw new Error(result.error.code);
+  assert.equal(result.data.gtfsId, '1:U1Z1');
+  assert.equal(result.data.name, 'Main');
+  assert.equal(result.data.wheelchairBoarding, 'POSSIBLE');
+  assert.deepEqual(result.data.parentStation, { gtfsId: '1:U1', name: 'Main station' });
+  assert.deepEqual(result.data.departures.map((d) => d.tripGtfsId), ['1:t1']);
+});
+
+test('stopDepartures for a station has no parent station or wheelchair boarding', async () => {
+  const mock = mockFetch({
+    json: {
+      stop: { gtfsId: '1:U1', name: 'Main station', wheelchairBoarding: null, parentStation: null, stoptimesWithoutPatterns: [departureRow({})] },
+    },
+  });
+  const client = new SpiderClient('https://x', 'k', { fetch: mock.fetch });
+
+  const result = await client.routing.stopDepartures('1:U1');
+  if (!result.isSuccess) throw new Error(result.error.code);
+  assert.equal(result.data.gtfsId, '1:U1');
+  assert.equal(result.data.wheelchairBoarding, null);
+  assert.equal(result.data.parentStation, null);
+  assert.equal(result.data.departures.length, 1);
+});
+
+test('departures returns the stopDepartures departures, and both fail alike on an unknown id or a bad timeRange', async () => {
+  const board = { gtfsId: '1:U1Z1', name: 'Main', wheelchairBoarding: 'POSSIBLE', parentStation: { gtfsId: '1:U1', name: 'Main station' }, stoptimesWithoutPatterns: [departureRow({})] };
+  const known = mockFetch({ json: { stop: board } });
+  const client = new SpiderClient('https://x', 'k', { fetch: known.fetch });
+  const departures = await client.routing.departures('1:U1Z1');
+  const withStop = await client.routing.stopDepartures('1:U1Z1');
+  if (!departures.isSuccess || !withStop.isSuccess) throw new Error('expected success');
+  assert.ok(Array.isArray(departures.data));
+  assert.deepEqual(departures.data, withStop.data.departures);
+
+  const unknown = new SpiderClient('https://x', 'k', { fetch: mockFetch({ json: { stop: null } }).fetch });
+  for (const result of [await unknown.routing.departures('1:nope'), await unknown.routing.stopDepartures('1:nope')]) {
+    assert.equal(result.isSuccess, false);
+    if (!result.isSuccess) {
+      assert.equal(result.error.code, 'not_found');
+      assert.equal(result.error.message, 'routing returned no stop or station for id=1:nope');
+    }
+  }
+
+  const range = await client.routing.stopDepartures('1:U1Z1', 5, { timeRangeSeconds: 0 });
+  assert.equal(range.isSuccess, false);
+  if (!range.isSuccess) assert.equal(range.error.field, 'timeRange');
+  assert.equal(known.calls.length, 2);
+});

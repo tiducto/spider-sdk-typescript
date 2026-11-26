@@ -552,3 +552,54 @@ test('planStream and its continuations reject a preference out of range on its p
   }
   assert.equal(mock.calls.length, 0);
 });
+
+test('planStream and its continuations send modeReluctance as costs, or on the allowed list, and reject one out of range', async () => {
+  const mock = sseFetch([PAGE_INFO_FRAME, DONE_FRAME]);
+  const client = new SpiderClient('https://x', 'k', { fetch: mock.fetch });
+  const options: PlanStreamRequestOptions = {
+    ...STREAM_OPTIONS,
+    excludedTransitModes: ['RAIL'],
+    preferences: { modeReluctance: { TRAM: 0.5, BUS: 2 } },
+  };
+
+  await collect(client.routing.planStream(options));
+  await collect(client.routing.planStreamNext(options, 'c-end'));
+  await collect(client.routing.planStreamPrevious(options, 'c-start'));
+  await collect(client.routing.planStream({ ...STREAM_OPTIONS, allowedTransitModes: ['TRAM'], preferences: { modeReluctance: { TRAM: 0.5, BUS: 2 } } }));
+  await collect(client.routing.planStream({ ...STREAM_OPTIONS, preferences: { modeReluctance: {} } }));
+
+  const modes = { transit: { exclude: ['RAIL'], costs: [{ mode: 'BUS', reluctance: 2 }, { mode: 'TRAM', reluctance: 0.5 }] } };
+  const bodies = mock.calls.map((c) => JSON.parse(c.body));
+  assert.deepEqual(bodies.map((b) => b.modes), [modes, modes, modes, { transit: { transit: [{ mode: 'TRAM', cost: { reluctance: 0.5 } }] } }, undefined]);
+
+  const events = await collect(client.routing.planStreamNext({ ...options, preferences: { modeReluctance: { BUS: 200_000 } } }, 'c'));
+  assert.equal(events.length, 1);
+  const ev = events[0];
+  assert.equal(ev.type === 'failure' && ev.error.field, 'modes.transit.costs.reluctance');
+  assert.equal(mock.calls.length, 5);
+});
+
+test('a chunk leg carries its stops parent stations', () => {
+  const stop = (parentStation: unknown) => ({ gtfsId: '1:A', wheelchairBoarding: 'POSSIBLE', platformCode: null, zoneId: null, parentStation });
+  const leg = {
+    mode: 'BUS',
+    start: { scheduledTime: '2026-07-15T08:00:00Z', estimated: null },
+    end: { scheduledTime: '2026-07-15T08:10:00Z', estimated: null },
+    realtimeState: 'SCHEDULED',
+    realTime: false,
+    from: { name: 'A', stopPosition: 1, stop: stop({ gtfsId: '1:ST', name: 'Station' }) },
+    to: { name: 'B', stopPosition: 2, stop: stop(null) },
+    distance: 1000,
+    duration: 600,
+    interlineWithPreviousLeg: false,
+    pickupType: 'SCHEDULED',
+    dropoffType: 'SCHEDULED',
+    legGeometry: { points: '' },
+  };
+  const itinerary = { start: leg.start.scheduledTime, end: leg.end.scheduledTime, duration: 600, waitingTime: 0, numberOfTransfers: 0, legs: [leg] };
+  const ev = parsePlanStreamRecord('chunk', JSON.stringify({ results: [itinerary] }));
+  assert.equal(ev?.type, 'result');
+  if (ev?.type !== 'result') return;
+  assert.deepEqual(ev.itineraries[0].legs[0].fromParentStation, { gtfsId: '1:ST', name: 'Station' });
+  assert.equal(ev.itineraries[0].legs[0].toParentStation, null);
+});
