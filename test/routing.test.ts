@@ -1296,7 +1296,7 @@ test('plan folds modeReluctance into the allowed list and drops a mode not allow
 test('plan with no, empty or only non-transit modeReluctance sends no costs', async () => {
   const mock = mockFetch({ json: PLAN_RESPONSE });
   const client = new SpiderClient('https://x', 'k', { fetch: mock.fetch });
-  const ends = { origin: Location.stop('1:A'), destination: Location.stop('1:B'), excludedTransitModes: ['TRAM'] } as const;
+  const ends = { origin: Location.stop('1:A'), destination: Location.stop('1:B'), departAt: new Date('2026-07-20T08:00:00Z'), excludedTransitModes: ['TRAM'] } as const;
 
   await client.routing.plan(ends);
   await client.routing.plan({ ...ends, preferences: { modeReluctance: {} } });
